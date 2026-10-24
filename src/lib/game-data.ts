@@ -1,0 +1,313 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { dataDir, getSnapshot, saveSnapshot } from "./store";
+import type { Snapshot, Species } from "./types";
+
+const urls: Record<string, string> = {
+  "pvpoke.json":
+    "https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/gamemaster.json",
+  "game-master.json":
+    "https://raw.githubusercontent.com/PokeMiners/game_masters/master/latest/latest.json",
+  "zh-Hant.txt":
+    "https://raw.githubusercontent.com/PokeMiners/pogo_assets/master/Texts/Latest%20APK/ChineseTraditional.txt",
+  ...Object.fromEntries(
+    [1500, 2500, 10000].map((cp) => [
+      `rankings-${cp}.json`,
+      `https://raw.githubusercontent.com/pvpoke/pvpoke/master/src/data/rankings/all/overall/rankings-${cp}.json`,
+    ]),
+  ),
+};
+// Raw upstream formats are deliberately isolated from the application's typed snapshot.
+type Raw = Record<string, any>; // eslint-disable-line
+function parseTexts(text: string) {
+  const entries: Record<string, string> = {};
+  for (const match of text.matchAll(
+    /RESOURCE ID: ([^\r\n]+)\r?\nTEXT: ([^\r\n]+)/g,
+  ))
+    entries[match[1]] = match[2];
+  return entries;
+}
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/_shadow$/, " ")
+    .trim()
+    .replace(/_normal$/, " ")
+    .trim()
+    .replace(/alolan/g, "alola")
+    .replace(/galarian/g, "galar")
+    .replace(/hisuian/g, "hisui")
+    .replace(/paldean/g, "paldea");
+export function normalizeData(
+  pvp: Raw,
+  gm: Raw[],
+  texts: string,
+  ranks: Record<string, Raw[]>,
+  version: string,
+): Snapshot {
+  if (
+    !Array.isArray(pvp.pokemon) ||
+    pvp.pokemon.length < 100 ||
+    !Array.isArray(gm)
+  )
+    throw new Error("遊戲資料格式不符，已保留舊版本");
+  const tr = parseTexts(texts),
+    gmPokemon = new Map<string, Raw>();
+  for (const row of gm)
+    if (row.data?.pokemonSettings)
+      gmPokemon.set(
+        norm(row.templateId.replace(/^V\d+_POKEMON_/, "")),
+        row.data.pokemonSettings,
+      );
+  const species: Snapshot["species"] = {},
+    names: Record<string, string> = {},
+    moveNames: Record<string, string> = {};
+  for (const p of pvp.pokemon) {
+    if (p.released === false || !p.baseStats || p.tags?.includes("mega"))
+      continue;
+    const baseId = p.speciesId.replace(/_shadow$/, ""),
+      g = gmPokemon.get(norm(baseId));
+    const zh =
+      tr[`pokemon_name_${String(p.dex).padStart(4, "0")}`] || p.speciesName;
+    const suffix =
+      p.speciesName
+        .match(/\(.+\)/)?.[0]
+        ?.replace(/ \(Shadow\)/, "")
+        .replace("(Shadow)", "") || "";
+    const name =
+      zh +
+      (suffix ? ` ${suffix}` : "") +
+      (p.tags?.includes("shadow") ? "（暗影）" : "");
+    const branches = g?.evolutionBranch || [];
+    const evolutions = (p.family?.evolutions || []).map((e: string) => {
+      const branch =
+        branches.find(
+          (b: Raw) => norm(b.form || b.evolution || "") === norm(e),
+        ) ||
+        branches.find((b: Raw) => norm(b.evolution || "") === norm(e)) ||
+        (branches.length === 1 ? branches[0] : null);
+      const conditions: string[] = [];
+      if (branch) {
+        if (branch.evolutionItemRequirement)
+          conditions.push(`需要進化道具 ${branch.evolutionItemRequirement}`);
+        if (branch.genderRequirement)
+          conditions.push(`性別限制 ${branch.genderRequirement}`);
+        if (branch.buddyDistanceRequirement)
+          conditions.push(`夥伴步行 ${branch.buddyDistanceRequirement} km`);
+        if (
+          branch.onlyNighttime ||
+          branch.onlyDaytime ||
+          branch.timeOfDayRequirement
+        )
+          conditions.push("有時段限制");
+        if (branch.questDisplay) conditions.push("須完成進化任務");
+        const known = new Set([
+          "evolution",
+          "form",
+          "candyCost",
+          "candyCostPurified",
+          "noCandyCostViaTrade",
+          "evolutionItemRequirement",
+          "genderRequirement",
+          "buddyDistanceRequirement",
+          "onlyNighttime",
+          "onlyDaytime",
+          "timeOfDayRequirement",
+          "questDisplay",
+          "lureItemRequirement",
+        ]);
+        if (Object.keys(branch).some((k) => !known.has(k)))
+          conditions.push("有額外進化條件，請核對遊戲");
+        if (branch.lureItemRequirement) conditions.push("需要特定誘餌模組");
+      } else conditions.push("進化成本／條件資料不足，請核對遊戲");
+      return {
+        id: e,
+        candy: branch?.candyCost ?? g?.candyToEvolve ?? 0,
+        condition: conditions.length ? conditions.join("；") : null,
+        gender: branch?.genderRequirement?.includes("FEMALE")
+          ? "female"
+          : branch?.genderRequirement?.includes("MALE")
+            ? "male"
+            : undefined,
+      };
+    });
+    const tags = [...(p.tags || [])];
+    if (g?.pokemonClass?.includes("LEGENDARY")) tags.push("legendary");
+    if (g?.pokemonClass?.includes("MYTHIC")) tags.push("mythical");
+    species[p.speciesId] = {
+      id: p.speciesId,
+      dex: p.dex,
+      name,
+      types: p.types.filter((t: string) => t !== "none"),
+      atk: p.baseStats.atk,
+      def: p.baseStats.def,
+      sta: p.baseStats.hp,
+      fast: p.fastMoves || [],
+      charged: p.chargedMoves || [],
+      elite: p.eliteMoves || [],
+      tags: [...new Set(tags)] as string[],
+      evolutions,
+      thirdMove: g?.thirdMove
+        ? {
+            dust: g.thirdMove.stardustToUnlock,
+            candy: g.thirdMove.candyToUnlock,
+          }
+        : null,
+      form: suffix || null,
+    };
+    names[p.speciesId] = name;
+  }
+  const moves: Snapshot["moves"] = {};
+  for (const row of gm) {
+    const m = row.data?.moveSettings;
+    if (!m || !m.durationMs || typeof m.movementId !== "string") continue;
+    const moveId = m.movementId.replace(/_FAST$/, ""),
+      numeric = row.templateId.match(/^V(\d+)_MOVE_/);
+    const name = numeric ? tr[`move_name_${numeric[1]}`] : null;
+    moveNames[moveId] =
+      name || pvp.moves.find((v: Raw) => v.moveId === moveId)?.name || moveId;
+    moves[moveId] = {
+      id: moveId,
+      name: moveNames[moveId],
+      type: (m.pokemonType || "").replace("POKEMON_TYPE_", "").toLowerCase(),
+      power: m.power || 0,
+      energy: m.energyDelta || 0,
+      duration: m.durationMs / 1000,
+    };
+  }
+  const cpm = gm.find((r) => r.templateId === "PLAYER_LEVEL_SETTINGS")?.data
+    ?.playerLevel?.cpMultiplier;
+  const upgrades = gm.find((r) => r.templateId === "POKEMON_UPGRADE_SETTINGS")
+    ?.data?.pokemonUpgrades;
+  if (!Array.isArray(cpm) || cpm.length < 51 || !upgrades?.stardustCost)
+    throw new Error("CP／成本資料不完整，已保留舊版本");
+  const rankings: Snapshot["rankings"] = {};
+  for (const [league, rows] of Object.entries(ranks)) {
+    if (!Array.isArray(rows) || rows.length < 100)
+      throw new Error(`${league} 聯盟排名格式不符`);
+    rankings[league] = rows.map((r) => ({
+      speciesId: r.speciesId,
+      score: r.score,
+      moves: r.moveset || [],
+    }));
+  }
+  return {
+    version,
+    updatedAt: new Date().toISOString(),
+    sourceDate: pvp.timestamp || "未知",
+    sources: Object.entries(urls).map(([file, url]) => ({
+      name: file,
+      url,
+      version,
+    })),
+    species,
+    moves,
+    rankings,
+    cpm,
+    powerups: {
+      dust: upgrades.stardustCost,
+      candy: upgrades.candyCost,
+      xl: upgrades.xlCandyCost,
+    },
+    names,
+    moveNames,
+    warnings: [
+      "PvE 為簡化中性循環 DPS，不是指定頭目的實戰排名。",
+      "資料來源 Game Master 可能含未確認欄位；活動開放狀態需核對遊戲。",
+      "特殊物種的專屬強化成本及進化任務請核對遊戲；成本標為估算。",
+    ],
+  };
+}
+let activeUpdate: Promise<Snapshot> | null = null;
+export function updateGameData(useCache = false): Promise<Snapshot> {
+  if (activeUpdate) return activeUpdate;
+  activeUpdate = (async () => {
+    const dir = path.join(dataDir, "source");
+    await fs.mkdir(dir, { recursive: true });
+    const content: Record<string, string> = {};
+    await Promise.all(
+      Object.entries(urls).map(async ([name, url]) => {
+        if (useCache) {
+          try {
+            content[name] = await fs.readFile(path.join(dir, name), "utf8");
+            return;
+          } catch {}
+        }
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(45000),
+          cache: "no-store",
+        });
+        if (!response.ok)
+          throw new Error(`無法更新 ${name}（HTTP ${response.status}）`);
+        content[name] = await response.text();
+        if (content[name].length < 100) throw new Error(`${name} 資料異常`);
+      }),
+    );
+    const hash = createHash("sha256");
+    for (const name of Object.keys(urls).sort()) hash.update(content[name]);
+    const version = hash.digest("hex").slice(0, 16);
+    const snapshot = normalizeData(
+      JSON.parse(content["pvpoke.json"]),
+      JSON.parse(content["game-master.json"]),
+      content["zh-Hant.txt"],
+      Object.fromEntries(
+        [1500, 2500, 10000].map((cp) => [
+          String(cp),
+          JSON.parse(content[`rankings-${cp}.json`]),
+        ]),
+      ),
+      version,
+    );
+    // Publish only after every source has passed validation; a failed refresh leaves the previous snapshot active.
+    for (const [name, text] of Object.entries(content))
+      await fs.writeFile(path.join(dir, name), text);
+    saveSnapshot(snapshot);
+    return snapshot;
+  })().finally(() => {
+    activeUpdate = null;
+  });
+  return activeUpdate;
+}
+export function resolveSpecies(
+  snapshot: Snapshot,
+  name: string | null,
+  form: string | null,
+  shadow: boolean | null,
+  providedId: string | null,
+): Species | null {
+  if (providedId && snapshot.species[providedId]) {
+    const wanted =
+      shadow === true
+        ? providedId.replace(/_shadow$/, "") + "_shadow"
+        : shadow === false
+          ? providedId.replace(/_shadow$/, "")
+          : providedId;
+    return snapshot.species[wanted] || null;
+  }
+  if (!name) return null;
+  const candidates = Object.values(snapshot.species).filter(
+    (s) => s.name.split(" ")[0] === name || s.id === name.toLowerCase(),
+  );
+  const isForm = (s: Species) =>
+    !form || form === "normal" || form === "一般"
+      ? !s.form
+      : s.id.includes(form.toLowerCase().replace("alola", "alolan")) ||
+        s.form?.toLowerCase().includes(form.toLowerCase());
+  const exact = candidates.filter(
+    (s) => Boolean(s.tags.includes("shadow")) === Boolean(shadow) && isForm(s),
+  );
+  return exact.length === 1 ? exact[0] : null;
+}
+export function publicSnapshot(snapshot = getSnapshot()) {
+  return snapshot
+    ? {
+        version: snapshot.version,
+        updatedAt: snapshot.updatedAt,
+        sourceDate: snapshot.sourceDate,
+        sources: snapshot.sources,
+        count: Object.keys(snapshot.species).length,
+        warnings: snapshot.warnings,
+      }
+    : null;
+}
