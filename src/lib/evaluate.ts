@@ -11,6 +11,7 @@ import {
   type Species,
 } from "./types";
 import {
+  all,
   getSettings,
   getSnapshot,
   listPokemon,
@@ -18,6 +19,35 @@ import {
   put,
   transaction,
 } from "./store";
+import { blockingEvidenceIssues, specialStateFromMoves } from "./iphone-safety";
+import { moveName } from "./move-names";
+import { typeName } from "./type-names";
+import type { Scan, ScanItem } from "./iphone-types";
+
+function reviewReason(p: Pokemon, f: Fields, a: Analysis) {
+  if (p.candidates.length) return "與既有個體配對不明，請核對是否為同一隻";
+  if (specialStateFromMoves(f).conflict)
+    return "招式與暗影／淨化狀態衝突，請人工核對";
+  const evidenceIssue = blockingEvidenceIssues(p.issues, f)[0];
+  if (evidenceIssue) return evidenceIssue;
+  if (!f.speciesId) return "物種或形態尚未確認";
+  if (f.cp === null || [f.ivAtk, f.ivDef, f.ivSta].some((v) => v === null))
+    return "CP 或 IV 資料不完整";
+  if (f.shiny === null) return "色違狀態無法從截圖確認";
+  if (f.shadow === null || f.purified === null)
+    return "暗影或淨化狀態尚未確認";
+  if (f.favorite === null) return "最愛狀態尚未確認";
+  if (f.gender === null) return "性別尚未辨識";
+  if (f.hp === null || f.height === null || f.weight === null)
+    return "HP、身高或體重資料不完整";
+  if (!a.currentLevels.length) return "CP、HP 與 IV 無法對應合理等級";
+  if (!p.verified) return "多畫面證據尚未通過自動核對";
+  const analysisGap = a.warnings.find(
+    (warning) => warning.includes("不完整") || warning.includes("不適用"),
+  );
+  if (analysisGap) return `已核對個體；${analysisGap}`;
+  return "資料或配對尚待核對，暫不給放生結論";
+}
 
 export function multiplier(snapshot: Snapshot, level: number): number {
   const low = Math.floor(level),
@@ -286,12 +316,14 @@ function assess(p: Pokemon, snapshot: Snapshot | null): Analysis {
     a.warnings.push("部分進化有額外條件，尚未確認符合前僅列潛力");
   for (const path of paths) {
     const target = path.s;
-    if (
-      target.fast.some((m) => !snapshot.moves[m]) ||
-      target.charged.some((m) => !snapshot.moves[m])
-    )
+    const missingPveMoves = [...target.fast, ...target.charged].filter(
+      (move) => !snapshot.moves[move],
+    );
+    if (missingPveMoves.length)
       a.warnings.push(
-        `${target.name} 有招式缺少 PvE 數值，團體戰比較可能不完整`,
+        `${target.id === s.id ? "目前形態" : "可能進化形態"} ${target.name} 的招式 ${missingPveMoves
+          .map((move) => moveName(move, snapshot.moveNames))
+          .join("、")} 缺少團體戰（PvE）威力／時長資料，團體戰輸出比較不完整`,
       );
     for (const cap of [1500, 2500, 10000]) {
       const ranking = snapshot.rankings[String(cap)] || [],
@@ -430,6 +462,7 @@ export function evaluateCollection(
   records: Pokemon[],
   snapshot: Snapshot | null,
   settings: Settings,
+  completeBoxIds?: Set<string>,
 ): Pokemon[] {
   const result = records.map((p) => ({ ...p, analysis: assess(p, snapshot) }));
   const living = result.filter((p) => p.owned);
@@ -465,6 +498,37 @@ export function evaluateCollection(
       .sort((a, b) => quality(b) - quality(a))
       .slice(0, settings.rareRepresentatives)
       .forEach((p) => add(p, "保留此特殊收藏的代表個體", peers));
+  const highIvGroups = new Map<string, Pokemon[]>();
+  for (const p of confirmed) {
+    const f = effective(p);
+    if (
+      !f.speciesId || f.ivAtk === null || f.ivDef === null ||
+      f.ivSta === null || f.ivAtk + f.ivDef + f.ivSta < 40 ||
+      f.shadow === null || f.purified === null || f.shiny === null ||
+      f.costume !== null || p.maxStatus == null ||
+      specialStateFromMoves(f).conflict
+    ) continue;
+    const key = `${f.speciesId}/${f.form || "normal"}/${f.shadow}`;
+    highIvGroups.set(key, [...(highIvGroups.get(key) || []), p]);
+  }
+  const highIvPeers = new Map<string, string>();
+  for (const peers of highIvGroups.values()) {
+    peers.sort((left, right) => {
+      const a = effective(left), b = effective(right);
+      const total = (f: Fields) => (f.ivAtk ?? 0) + (f.ivDef ?? 0) + (f.ivSta ?? 0);
+      return total(b) - total(a) ||
+        (b.ivAtk ?? 0) - (a.ivAtk ?? 0) ||
+        Math.min(...right.analysis!.currentLevels) -
+          Math.min(...left.analysis!.currentLevels) ||
+        (b.cp ?? 0) - (a.cp ?? 0) ||
+        left.id.localeCompare(right.id);
+    });
+    const winner = peers[0];
+    const f = effective(winner);
+    const total = f.ivAtk! + f.ivDef! + f.ivSta!;
+    add(winner, `IV ${total}/45；保留此物種已核對個體中最佳的高 IV 收藏代表`, peers);
+    for (const peer of peers.slice(1)) highIvPeers.set(peer.id, winner.id);
+  }
   const pvp = new Map<string, { p: Pokemon; l: LeagueResult }[]>();
   for (const p of confirmed)
     for (const l of p.analysis!.leagues)
@@ -487,7 +551,7 @@ export function evaluateCollection(
     const { p, l } = rows[0];
     add(
       p,
-      `${l.name} 入選${l.league === 10000 ? "大師" : l.league === 1500 ? "超級" : "高級"}聯盟：環境 #${l.metaRank}／IV #${l.ivRank}`,
+      `${l.name} 入選 PvP ${l.league === 10000 ? "大師" : l.league === 1500 ? "超級" : "高級"}聯盟：環境排名 #${l.metaRank}／IV 排名 #${l.ivRank}`,
       rows.map((r) => r.p),
     );
   }
@@ -512,16 +576,228 @@ export function evaluateCollection(
     for (const { p, r } of rows.slice(0, settings.raidSlots))
       add(
         p,
-        `${r.name} 入選 ${r.type} 屬性隊伍，基準物種 #${r.rank}`,
+        `${r.name} 入選團體戰 ${typeName(r.type)}屬性隊伍：基準物種輸出排名 #${r.rank}`,
         rows.map((r) => r.p),
       );
+  }
+  type EvolutionOption = { target: Species; condition: string | null };
+  const evolutionGroups = new Map<string, { p: Pokemon; options: EvolutionOption[] }[]>();
+  const evolutionNeedsReview = new Set<string>();
+  for (const p of living) {
+    const f = effective(p),
+      a = p.analysis!;
+    if (
+      p.locked || f.shiny === true || !p.verified || p.candidates.length ||
+      specialStateFromMoves(f).conflict || !snapshot || !f.speciesId ||
+      !a.currentLevels.length ||
+      [f.cp, f.ivAtk, f.ivDef, f.ivSta, f.shadow, f.purified, f.shiny].some(
+        (value) => value === null,
+      ) ||
+      p.evolutionSilhouette !== true || f.costume !== null ||
+      !completeBoxIds?.has(p.id)
+    ) continue;
+    const evolutions = snapshot.species[f.speciesId]?.evolutions.filter(
+      (evolution) => !evolution.gender || evolution.gender === f.gender,
+    ) || [];
+    const options = evolutions.flatMap((evolution) => {
+      const target = snapshot.species[evolution.id];
+      return target ? [{ target, condition: evolution.condition }] : [];
+    });
+    if (!options.length || options.length !== evolutions.length) {
+      evolutionNeedsReview.add(p.id);
+      continue;
+    }
+    const missing = options.filter(({ target }) =>
+      !living.some((peer) =>
+        completeBoxIds.has(peer.id) && effective(peer).speciesId === target.id,
+      ),
+    );
+    if (missing.length !== options.length) {
+      if (missing.length) evolutionNeedsReview.add(p.id);
+      continue;
+    }
+    // The screenshot proves at least one branch is unregistered, but cannot
+    // pair each silhouette with a named branch. Only infer multi-branch
+    // evolution automatically when none of its immediate forms is in the box.
+    const key = `${f.speciesId}/${options.map(({ target }) => target.id).sort().join(",")}`;
+    evolutionGroups.set(key, [
+      ...(evolutionGroups.get(key) || []),
+      { p, options },
+    ]);
+  }
+  const evolutionWinners = new Map<string, EvolutionOption[]>();
+  const evolutionPeers = new Map<string, string>();
+  const unresolvedMissingEvolution = (pokemon: Pokemon) => {
+    if (pokemon.evolutionSilhouette != null || !completeBoxIds?.has(pokemon.id) || !snapshot)
+      return false;
+    const fields = effective(pokemon);
+    const species = fields.speciesId ? snapshot.species[fields.speciesId] : null;
+    return Boolean(species?.evolutions.some((evolution) =>
+      (!evolution.gender || evolution.gender === fields.gender) &&
+      snapshot.species[evolution.id] &&
+      !living.some((peer) =>
+        completeBoxIds.has(peer.id) && effective(peer).speciesId === evolution.id,
+      ),
+    ));
+  };
+  const evolutionRank = (p: Pokemon, target: Species) => {
+    const a = p.analysis!, f = effective(p);
+    const pvp = a.leagues
+      .filter(
+        (league) =>
+          league.speciesId === target.id && league.eligible &&
+          league.metaRank !== null && league.metaRank <= settings.metaCutoff &&
+          league.ivRank <= settings.ivCutoff,
+      )
+      .sort((left, right) => left.ivRank - right.ivRank)[0];
+    const raidDps = Math.max(
+      0,
+      ...a.raids
+        .filter((raid) => raid.speciesId === target.id && raid.rank <= 10)
+        .map((raid) => raid.dps),
+    );
+    return [
+      pvp ? 1 : 0,
+      pvp ? -pvp.ivRank : 0,
+      raidDps,
+      (f.ivAtk || 0) + (f.ivDef || 0) + (f.ivSta || 0),
+      f.ivAtk || 0,
+      Math.min(...a.currentLevels),
+      f.cp || 0,
+    ];
+  };
+  const compareRank = (a: number[], b: number[]) => {
+    for (let i = 0; i < a.length; i++)
+      if (a[i] !== b[i]) return b[i] - a[i];
+    return 0;
+  };
+  const bestEvolutionRank = (p: Pokemon, options: EvolutionOption[]) =>
+    options.map(({ target }) => evolutionRank(p, target)).sort(compareRank)[0];
+  for (const group of evolutionGroups.values()) {
+    group.sort((left, right) => {
+      return compareRank(
+        bestEvolutionRank(left.p, left.options),
+        bestEvolutionRank(right.p, right.options),
+      ) || left.p.id.localeCompare(right.p.id);
+    });
+    const winner = group[0];
+    evolutionWinners.set(winner.p.id, winner.options);
+    for (const peer of group.slice(1))
+      evolutionPeers.set(peer.p.id, winner.p.id);
+  }
+  const maxGroups = new Map<string, Pokemon[]>();
+  for (const p of confirmed) {
+    const speciesId = effective(p).speciesId;
+    if (!speciesId || !["dynamax", "gigantamax"].includes(p.maxStatus || ""))
+      continue;
+    maxGroups.set(speciesId, [...(maxGroups.get(speciesId) || []), p]);
+  }
+  const maxPeers = new Map<string, string>();
+  for (const group of maxGroups.values()) {
+    group.sort((left, right) =>
+      Number(right.locked) - Number(left.locked) ||
+      Number(right.maxStatus === "gigantamax") -
+        Number(left.maxStatus === "gigantamax") ||
+      quality(right) - quality(left) ||
+      left.id.localeCompare(right.id),
+    );
+    add(group[0], "保留此物種的極巨化收藏代表", group);
+    for (const peer of group.slice(1)) maxPeers.set(peer.id, group[0].id);
+  }
+  // Froakie and Frogadier can reach Mega Greninja after ordinary evolution.
+  // Pick one representative across the whole line, including Greninja already owned.
+  const megaGreninjaIds = new Set(["froakie", "frogadier", "greninja"]);
+  const megaGreninja = snapshot?.species.froakie?.evolutions.some((x) =>
+    x.id === "frogadier",
+  ) && snapshot.species.frogadier?.evolutions.some((x) =>
+    x.id === "greninja",
+  ) && snapshot.species.greninja
+    ? confirmed.filter((p) => {
+        const f = effective(p);
+        return Boolean(
+          f.speciesId && megaGreninjaIds.has(f.speciesId) &&
+          f.shadow === false && f.costume === null &&
+          f.ivAtk !== null && f.ivDef !== null && f.ivSta !== null,
+        );
+      })
+    : [];
+  megaGreninja.sort((left, right) => {
+    const a = effective(left), b = effective(right);
+    const stage = (id: string | null) =>
+      id === "greninja" ? 2 : id === "frogadier" ? 1 : 0;
+    return (b.ivAtk ?? 0) - (a.ivAtk ?? 0) ||
+      ((b.ivAtk ?? 0) + (b.ivDef ?? 0) + (b.ivSta ?? 0)) -
+        ((a.ivAtk ?? 0) + (a.ivDef ?? 0) + (a.ivSta ?? 0)) ||
+      stage(b.speciesId) - stage(a.speciesId) ||
+      Math.min(...right.analysis!.currentLevels) -
+        Math.min(...left.analysis!.currentLevels) ||
+      left.id.localeCompare(right.id);
+  });
+  const megaGreninjaWinner = megaGreninja[0];
+  const megaGreninjaPeers = new Map<string, string>();
+  if (megaGreninjaWinner) {
+    add(
+      megaGreninjaWinner,
+      "保留超級甲賀忍蛙進化線的收藏代表",
+      megaGreninja,
+    );
+    for (const peer of megaGreninja.slice(1))
+      megaGreninjaPeers.set(peer.id, megaGreninjaWinner.id);
+  }
+  // The reference snapshot contains ordinary Venusaur but no Mega Venusaur
+  // species row. Reserve the best confirmed member of its evolution line.
+  const megaVenusaurIds = new Set(["bulbasaur", "ivysaur", "venusaur"]);
+  const megaVenusaur = snapshot?.species.bulbasaur?.evolutions.some((x) =>
+    x.id === "ivysaur",
+  ) && snapshot.species.ivysaur?.evolutions.some((x) =>
+    x.id === "venusaur",
+  ) && snapshot.species.venusaur
+    ? confirmed.filter((p) => {
+        const f = effective(p);
+        return Boolean(
+          f.speciesId && megaVenusaurIds.has(f.speciesId) &&
+          f.shadow === false && f.costume === null &&
+          f.ivAtk !== null && f.ivDef !== null && f.ivSta !== null,
+        );
+      })
+    : [];
+  const venusaurStage = (id: string | null) =>
+    id === "venusaur" ? 2 : id === "ivysaur" ? 1 : 0;
+  megaVenusaur.sort((left, right) => {
+    const a = effective(left), b = effective(right);
+    const total = (f: Fields) => (f.ivAtk ?? 0) + (f.ivDef ?? 0) + (f.ivSta ?? 0);
+    return total(b) - total(a) ||
+      (b.ivAtk ?? 0) - (a.ivAtk ?? 0) ||
+      venusaurStage(b.speciesId) - venusaurStage(a.speciesId) ||
+      Math.min(...right.analysis!.currentLevels) -
+        Math.min(...left.analysis!.currentLevels) ||
+      left.id.localeCompare(right.id);
+  });
+  const megaVenusaurWinner = megaVenusaur[0];
+  const megaVenusaurPeers = new Map<string, string>();
+  if (megaVenusaurWinner) {
+    add(megaVenusaurWinner, "保留超級妙蛙花進化線的收藏代表", megaVenusaur);
+    for (const peer of megaVenusaur.slice(1))
+      megaVenusaurPeers.set(peer.id, megaVenusaurWinner.id);
   }
   for (const p of result) {
     const a = p.analysis!,
       f = effective(p),
       picks = selected.get(p.id) || [];
     const hasCombat = picks.some((x) => !x.reason.includes("收藏"));
+    const evolution = evolutionWinners.get(p.id);
     a.comparedWith = [...new Set(picks.flatMap((x) => x.peers))];
+    if (evolutionPeers.has(p.id))
+      a.comparedWith.push(evolutionPeers.get(p.id)!);
+    if (maxPeers.has(p.id))
+      a.comparedWith.push(maxPeers.get(p.id)!);
+    if (megaGreninjaPeers.has(p.id))
+      a.comparedWith.push(megaGreninjaPeers.get(p.id)!);
+    if (megaVenusaurPeers.has(p.id))
+      a.comparedWith.push(megaVenusaurPeers.get(p.id)!);
+    if (highIvPeers.has(p.id))
+      a.comparedWith.push(highIvPeers.get(p.id)!);
+    a.comparedWith = [...new Set(a.comparedWith)];
     if (!p.owned) {
       a.category = "collect";
       a.reasons = ["已標記離開收藏庫，不參與現有個體比較"];
@@ -530,7 +806,11 @@ export function evaluateCollection(
     if (p.locked) {
       a.category = "collect";
       a.reasons.unshift("已由你鎖定保留");
+    } else if (f.shiny === true) {
+      a.category = "collect";
+      a.reasons.unshift("已確認色違，保留且不列入放生候選");
     } else if (
+      specialStateFromMoves(f).conflict ||
       !p.verified ||
       p.candidates.length ||
       !snapshot ||
@@ -538,18 +818,72 @@ export function evaluateCollection(
       [f.cp, f.ivAtk, f.ivDef, f.ivSta, f.shadow, f.purified, f.shiny].some(
         (v) => v === null,
       ) ||
-      !a.currentLevels.length ||
-      a.warnings.some((w) => w.includes("不完整") || w.includes("不適用"))
+      !a.currentLevels.length
     ) {
       a.category = "review";
-      a.reasons.unshift("資料或配對尚待核對，暫不給放生結論");
+      a.reasons.unshift(reviewReason(p, f, a));
+    } else if (evolution) {
+      a.category = "evolve";
+      if (evolution.length === 1) {
+        a.reasons.unshift(
+          `進化按鈕顯示未登錄剪影；最近一次完整盒子掃描沒有 ${evolution[0].target.name}；同類中優先進化這隻`,
+        );
+        a.actions.unshift(
+          `可考慮進化為 ${evolution[0].target.name}${evolution[0].condition ? `；條件：${evolution[0].condition}` : ""}。`,
+        );
+      } else {
+        const names = evolution.map(({ target }) => target.name).join("、");
+        a.reasons.unshift(
+          `進化按鈕顯示未登錄剪影；最近一次完整盒子掃描沒有下一階分支（${names}）；同類中優先進化這隻`,
+        );
+        a.actions.unshift(`可考慮進化為 ${names}；請在遊戲確認分支與進化道具。`);
+      }
+    } else if (evolutionNeedsReview.has(p.id)) {
+      a.category = "review";
+      a.reasons.unshift("有未登錄進化剪影，但多分支與收藏狀態無法唯一對應；請人工核對");
+    } else if (unresolvedMissingEvolution(p)) {
+      a.category = "review";
+      a.reasons.unshift("盒內缺少下一階進化型，但進化剪影尚未判定；確認前不列入可放生");
+    } else if (a.warnings.some((w) => w.includes("不完整") || w.includes("不適用"))) {
+      a.category = "review";
+      a.reasons.unshift(reviewReason(p, f, a));
     } else if (hasCombat) a.category = "invest";
     else if (picks.length) a.category = "collect";
+    else if (
+      f.speciesId && snapshot?.species[f.speciesId]?.tags.some((tag) =>
+        ["legendary", "mythical", "ultrabeast"].includes(tag),
+      )
+    ) {
+      a.category = "collect";
+      a.reasons.unshift("傳說、幻之或究極異獸，保留且不列入放生候選");
+    }
+    else if (p.maxStatus == null) {
+      a.category = "review";
+      a.reasons.unshift("極巨化狀態未能從能力頁確認，放生前請核對");
+    }
     else {
       a.category = "transfer";
       a.reasons.push(
         "在已匯入且仍持有的個體中，未入選收藏代表、PvP 名額或團體戰隊伍",
       );
+    }
+    if (evolutionPeers.has(p.id))
+      a.reasons.push("同類已有更適合進化的個體");
+    if (maxPeers.has(p.id))
+      a.reasons.push("同物種已有保留的極巨化個體");
+    if (highIvPeers.has(p.id))
+      a.reasons.push("同物種已有 IV 更高的保留個體");
+    if (megaGreninjaPeers.has(p.id) && megaGreninjaWinner) {
+      const winner = effective(megaGreninjaWinner);
+      const reason = `已保留 ${winner.name || "甲賀忍蛙"} CP ${winner.cp ?? "?"} 作超級甲賀忍蛙進化線代表`;
+      if (a.category === "transfer") a.reasons.unshift(reason);
+      else a.reasons.push(reason);
+    }
+    if (megaVenusaurPeers.has(p.id) && megaVenusaurWinner) {
+      const winner = effective(megaVenusaurWinner);
+      const reason = `已保留妙蛙花進化線 CP ${winner.cp ?? "?"} 作超級妙蛙花代表`;
+      if (a.category === "transfer") a.reasons.unshift(reason);
+      else a.reasons.push(reason);
     }
     a.reasons.push(...picks.map((x) => x.reason));
     if (hasCombat) {
@@ -577,7 +911,9 @@ export function evaluateCollection(
       else if (bestLeague?.moves.length) {
         const normalizeMove = (v: string) =>
           snapshot?.moves[v]?.id ||
-          Object.values(snapshot?.moves || {}).find((m) => m.name === v)?.id ||
+          Object.values(snapshot?.moves || {}).find(
+            (m) => m.name === v || moveName(m.id, snapshot?.moveNames) === v,
+          )?.id ||
           v;
         const currentMoves = [f.fastMove, f.chargeMove, f.chargeMove2]
           .filter(Boolean)
@@ -587,7 +923,7 @@ export function evaluateCollection(
         );
         if (missing.length)
           a.actions.push(
-            `PvP 目標招式：${bestLeague.moves.map((m) => snapshot?.moveNames[m] || m).join("／")}。缺少 ${missing.map((m) => snapshot?.moveNames[m] || m).join("、")}；依一般／特殊招式類型使用學習器，限定招式另核對。`,
+            `PvP 目標招式：${bestLeague.moves.map((m) => moveName(m, snapshot?.moveNames)).join("／")}。缺少 ${missing.map((m) => moveName(m, snapshot?.moveNames)).join("、")}；依一般／特殊招式類型使用學習器，限定招式另核對。`,
           );
         if (!f.chargeMove2)
           a.actions.push(
@@ -600,10 +936,25 @@ export function evaluateCollection(
   return result;
 }
 export function reevaluate() {
+  const latestFullScan = all<Scan>("scans")
+    .filter((scan) => scan.scope === "all" && scan.status === "completed")
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  const fullItems = latestFullScan
+    ? all<ScanItem>("scan_items").filter(
+        (item) => item.scanId === latestFullScan.id && item.pokemonId,
+      )
+    : [];
+  const completeBoxIds =
+    latestFullScan &&
+    fullItems.length === latestFullScan.scanned &&
+    latestFullScan.scanned > 0
+      ? new Set(fullItems.map((item) => item.pokemonId!))
+      : undefined;
   const result = evaluateCollection(
     listPokemon(),
     getSnapshot(),
     getSettings(),
+    completeBoxIds,
   );
   transaction(() => {
     for (const p of result) put("pokemon", p.id, p);

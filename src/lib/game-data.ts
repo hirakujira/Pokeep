@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { dataDir, getSnapshot, saveSnapshot } from "./store";
 import type { Snapshot, Species } from "./types";
+import { moveName } from "./move-names";
 
 const urls: Record<string, string> = {
   "pvpoke.json":
@@ -39,6 +40,24 @@ const norm = (s: string) =>
     .replace(/galarian/g, "galar")
     .replace(/hisuian/g, "hisui")
     .replace(/paldean/g, "paldea");
+export function genderlessByDex(gm: Raw[]) {
+  const entries = new Map<number, boolean[]>();
+  for (const row of gm) {
+    const dex = row.templateId?.match(/^SPAWN_V(\d+)_POKEMON_/);
+    const gender = row.data?.genderSettings?.gender;
+    if (!dex || !gender) continue;
+    const number = Number(dex[1]);
+    entries.set(number, [
+      ...(entries.get(number) || []),
+      gender.genderlessPercent === 1 &&
+        !gender.malePercent &&
+        !gender.femalePercent,
+    ]);
+  }
+  return new Set(
+    [...entries].filter(([, values]) => values.every(Boolean)).map(([dex]) => dex),
+  );
+}
 export function normalizeData(
   pvp: Raw,
   gm: Raw[],
@@ -54,6 +73,7 @@ export function normalizeData(
     throw new Error("遊戲資料格式不符，已保留舊版本");
   const tr = parseTexts(texts),
     gmPokemon = new Map<string, Raw>();
+  const genderlessDex = genderlessByDex(gm);
   for (const row of gm)
     if (row.data?.pokemonSettings)
       gmPokemon.set(
@@ -139,6 +159,7 @@ export function normalizeData(
       id: p.speciesId,
       dex: p.dex,
       name,
+      genderless: genderlessDex.has(p.dex),
       types: p.types.filter((t: string) => t !== "none"),
       atk: p.baseStats.atk,
       def: p.baseStats.def,
@@ -165,8 +186,10 @@ export function normalizeData(
     const moveId = m.movementId.replace(/_FAST$/, ""),
       numeric = row.templateId.match(/^V(\d+)_MOVE_/);
     const name = numeric ? tr[`move_name_${numeric[1]}`] : null;
-    moveNames[moveId] =
-      name || pvp.moves.find((v: Raw) => v.moveId === moveId)?.name || moveId;
+    moveNames[moveId] = moveName(
+      moveId,
+      { [moveId]: name || pvp.moves.find((v: Raw) => v.moveId === moveId)?.name || moveId },
+    );
     moves[moveId] = {
       id: moveId,
       name: moveNames[moveId],

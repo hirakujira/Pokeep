@@ -1,20 +1,19 @@
 {
-  "name": "pokemon-go-recording-assistant",
+  "name": "pokekeep-iphone-use",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1",
+    "dev": "node scripts/local-server.mjs dev",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1",
+    "start": "node scripts/local-server.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "data:update": "node --import tsx scripts/update-data.ts",
-    "video:inspect": "node --import tsx scripts/inspect-video.ts",
-    "references:validate": "node --import tsx scripts/validate-references.ts"
+    "evolution:recheck": "node --import tsx scripts/recheck-evolution.ts",
+    "max:recheck": "node --import tsx scripts/recheck-max-status.ts"
   },
   "dependencies": {
-    "ffmpeg-static": "^5.3.0",
     "lucide-react": "^0.468.0",
     "next": "16.4.3",
     "openai": "^6.0.0",

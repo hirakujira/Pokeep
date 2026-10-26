@@ -11,28 +11,22 @@ import {
   ChevronRight,
   CircleHelp,
   ClipboardCheck,
-  Clock3,
   Database,
-  FileVideo2,
   Film,
   FolderHeart,
-  HardDrive,
   Info,
   Layers3,
-  Leaf,
   LoaderCircle,
   LockKeyhole,
-  Plus,
   RefreshCw,
   Search,
   Settings2,
-  ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
+  Star,
   Swords,
   Trash2,
   Upload,
-  Video,
+  Smartphone,
   X,
 } from "lucide-react";
 import {
@@ -41,11 +35,15 @@ import {
   effective,
   fieldLabels,
   type Fields,
-  type Job,
+  type Evidence,
   type Pokemon,
   type Settings,
   type Cost,
 } from "@/lib/types";
+import type { Scan, TransferBatch } from "@/lib/iphone-types";
+import { resumableTransferIndexes } from "@/lib/iphone-resume";
+import { localizeMoveText, moveName } from "@/lib/move-names";
+import { typeName } from "@/lib/type-names";
 
 type SnapshotInfo = {
   version: string;
@@ -57,55 +55,64 @@ type SnapshotInfo = {
 };
 type State = {
   pokemon: Pokemon[];
-  jobs: Job[];
   settings: Settings;
   snapshot: SnapshotInfo | null;
   apiConfigured: boolean;
   model: string;
 };
 type Catalog = {
-  species: { id: string; name: string; types: string[] }[];
+  species: { id: string; dex: number; name: string; types: string[] }[];
   moves: { id: string; name: string }[];
 };
-type Tab = "import" | "results" | "collection" | "settings";
+type Tab = "iphone" | "results" | "collection" | "settings";
+type PhoneState = {
+  worker: {
+    updatedAt: string;
+    ready: boolean;
+    message: string;
+    version: string | null;
+  } | null;
+  scan: Scan | null;
+  batch: TransferBatch | null;
+  resumableBatches: (TransferBatch & { resumeBlocked: string | null })[];
+};
 const empty: State = {
   pokemon: [],
-  jobs: [],
   settings: defaultSettings,
   snapshot: null,
   apiConfigured: false,
   model: "gpt-4.1-mini",
 };
 const tabs = [
-  { id: "import" as Tab, label: "匯入分析", icon: Video },
+  { id: "iphone" as Tab, label: "iPhone 掃描", icon: Smartphone },
   { id: "results" as Tab, label: "清倉結果", icon: ClipboardCheck },
   { id: "collection" as Tab, label: "收藏庫", icon: FolderHeart },
   { id: "settings" as Tab, label: "設定", icon: Settings2 },
 ];
-const typeNames: Record<string, string> = {
-  normal: "一般",
-  fire: "火",
-  water: "水",
-  electric: "電",
-  grass: "草",
-  ice: "冰",
-  fighting: "格鬥",
-  poison: "毒",
-  ground: "地面",
-  flying: "飛行",
-  psychic: "超能力",
-  bug: "蟲",
-  rock: "岩石",
-  ghost: "幽靈",
-  dragon: "龍",
-  dark: "惡",
-  steel: "鋼",
-  fairy: "妖精",
+const scanStatusLabels: Record<Scan["status"], string> = {
+  queued: "排隊中",
+  running: "進行中",
+  paused: "已暫停",
+  completed: "已完成",
+  stopped: "已停止",
+  failed: "失敗",
+};
+const entryStatusLabels: Record<TransferBatch["entries"][number]["status"], string> = {
+  pending: "等待中",
+  searching: "搜尋中",
+  unfavoriting: "取消最愛中",
+  prepared: "準備放生",
+  sent: "已送出",
+  submitted: "已點擊放生（未核對遊戲結果）",
+  confirmed: "已放生",
+  skipped: "已跳過",
+  uncertain: "結果不確定",
 };
 const icons = {
   transfer: Trash2,
   collect: FolderHeart,
   invest: Swords,
+  evolve: ArrowUpRight,
   review: CircleHelp,
 };
 const number = (n: number) => n.toLocaleString("zh-TW");
@@ -116,6 +123,25 @@ const date = (v: string) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+const sourceTime = (source: Evidence) =>
+  source.source === "iphone"
+    ? source.capturedAt
+      ? date(source.capturedAt)
+      : "擷取時間未知"
+    : `${source.time.toFixed(2)} 秒`;
+const sourceName = (source: Evidence) =>
+  source.source === "iphone" ? "iPhone 掃描" : source.video;
+const speciesLabel = (
+  catalog: Catalog,
+  speciesId: string | null,
+  fallbackName?: string | null,
+) => {
+  if (!speciesId) return "尚未指定物種";
+  const species = catalog.species.find((row) => row.id === speciesId);
+  return species
+    ? `#${species.dex} ${species.name}`
+    : fallbackName || "圖鑑資料載入中";
+};
 async function api<T = unknown>(
   url: string,
   method = "GET",
@@ -156,41 +182,74 @@ function Status({ category }: { category: keyof typeof categoryLabels }) {
 function Logo() {
   return (
     <div className="logo">
-      <span className="brand-symbol">
+      <span className="brand-symbol" aria-hidden="true">
         <i />
       </span>
-      <span>
-        pokékeep<span className="logo-dot">.</span>
-      </span>
+      Pokékeep
     </div>
   );
 }
 
+function PokemonSprite({ pokemon }: { pokemon: Pokemon }) {
+  const fields = effective(pokemon);
+  const source = fields.speciesId
+    ? `/api/sprites/${encodeURIComponent(fields.speciesId)}?shiny=${fields.shiny ? "1" : "0"}`
+    : null;
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  return (
+    <span
+      className="pokemon-token pokemon-sprite"
+      title="PokéAPI 像素圖；特殊服裝以來源截圖為準"
+    >
+      {source && failedSource !== source ? (
+        <img
+          src={source}
+          alt={`${fields.name || fields.speciesId}的物種參考像素圖`}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailedSource(source)}
+        />
+      ) : (
+        <Layers3 size={23} aria-label="沒有可用的像素圖" />
+      )}
+      {pokemon.locked ? (
+        <span className="pokemon-sprite-badge" title="已鎖定">
+          <LockKeyhole size={10} />
+        </span>
+      ) : fields.shadow ? (
+        <span className="pokemon-sprite-badge" title="暗影寶可夢">
+          ◈
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export default function Dashboard() {
-  const [tab, setTab] = useState<Tab>("import"),
+  const [tab, setTab] = useState<Tab>("iphone"),
     [state, setState] = useState<State>(empty),
     [catalog, setCatalog] = useState<Catalog>({ species: [], moves: [] });
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [toast, setToast] = useState(""),
-    [busy, setBusy] = useState(""),
-    [files, setFiles] = useState<File[]>([]),
-    [drag, setDrag] = useState(false),
-    [manual, setManual] = useState(false),
-    [uploadProgress, setUploadProgress] = useState(0);
+    [busy, setBusy] = useState("");
+  const [phoneState, setPhoneState] = useState<PhoneState | null>(null),
+    [scanScope, setScanScope] = useState<"results" | "all">("results"),
+    [trackedBatchId, setTrackedBatchId] = useState<string | null>(null),
+    [dismissedBatchId, setDismissedBatchId] = useState<string | null>(null);
   const [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all"),
     [sort, setSort] = useState("recent"),
     [selected, setSelected] = useState<string | null>(null),
+    [checkedTransfers, setCheckedTransfers] = useState<string[]>([]),
     [showArchived, setShowArchived] = useState(false);
   const closeDrawer = useCallback(() => setSelected(null), []);
-  const input = useRef<HTMLInputElement>(null),
-    backupInput = useRef<HTMLInputElement>(null),
-    uploadAbort = useRef<AbortController | null>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
   const refresh = useCallback(async () => {
     try {
       const result = await api<State>("state");
       setState(result);
+      setError("");
       setLoading(false);
     } catch (e) {
       setError((e as Error).message);
@@ -202,23 +261,26 @@ export default function Dashboard() {
       setCatalog(await api<Catalog>("species"));
     } catch {}
   }, []);
+  const refreshPhone = useCallback(async () => {
+    try {
+      setPhoneState(await api<PhoneState>("iphone"));
+    } catch {
+      /* main state keeps its own error */
+    }
+  }, []);
   useEffect(() => {
     void refresh();
     void loadCatalog();
-  }, [refresh, loadCatalog]);
+    void refreshPhone();
+  }, [refresh, loadCatalog, refreshPhone]);
   useEffect(() => {
-    const timer = setInterval(
-      () => void refresh(),
-      state.jobs.some(
-        (j) =>
-          j.status === "processing" ||
-          (j.status === "queued" && j.stage !== "等待上傳"),
-      )
-        ? 1500
-        : 10000,
-    );
+    const timer = setInterval(() => void refreshPhone(), 3000);
     return () => clearInterval(timer);
-  }, [state.jobs, refresh]);
+  }, [refreshPhone]);
+  useEffect(() => {
+    const timer = setInterval(() => void refresh(), 10000);
+    return () => clearInterval(timer);
+  }, [refresh]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 4500);
@@ -237,80 +299,49 @@ export default function Dashboard() {
     }
   };
   const notify = (message: string) => setToast(message);
+  const phoneAct = async (label: string, fn: () => Promise<void>) => {
+    await act(label, fn);
+    await refreshPhone();
+  };
+  const startSingleTransfer = (pokemonId: string) => {
+    void phoneAct("execute-one", async () => {
+      const batch = await api<TransferBatch>("transfers/execute-one", "POST", { pokemonId });
+      setTrackedBatchId(batch.id);
+      setDismissedBatchId(null);
+      notify("已開始放生");
+    });
+  };
+  const startSelectedTransfers = (pokemonIds: string[]) => {
+    void phoneAct("execute-many", async () => {
+      const batch = await api<TransferBatch>("transfers/execute-many", "POST", { pokemonIds });
+      setTrackedBatchId(batch.id);
+      setDismissedBatchId(null);
+      notify(`已開始放生 ${pokemonIds.length} 隻`);
+    });
+  };
   const navigate = (next: Tab) => {
     setTab(next);
     setQuery("");
     setFilter("all");
   };
-  const acceptFiles = (incoming: File[]) => {
-    const valid: File[] = [];
-    for (const f of incoming) {
-      if (!/\.(mp4|mov)$/i.test(f.name)) {
-        setError(`${f.name}：僅支援 MP4／MOV`);
-        continue;
-      }
-      if (f.size > 500 * 1024 * 1024) {
-        setError(`${f.name}：不可超過 500 MB`);
-        continue;
-      }
-      valid.push(f);
-    }
-    setFiles((current) => [...current, ...valid].slice(0, 20));
-  };
-  async function upload() {
-    if (!files.length) return;
-    const controller = new AbortController();
-    uploadAbort.current = controller;
-    let jobId: string | null = null;
-    await act("upload", async () => {
-      setUploadProgress(0);
-      const job = await api<Job>("jobs", "POST", {
-        name: `錄影分析 · ${new Date().toLocaleDateString("zh-TW")} · ${files.length} 段`,
-      });
-      jobId = job.id;
-      for (let i = 0; i < files.length; i++) {
-        const response = await fetch(
-          `/api/jobs/${job.id}/files?name=${encodeURIComponent(files[i].name)}`,
-          {
-            method: "PUT",
-            headers: {
-              "x-pogo-local": "1",
-              "Content-Type": "application/octet-stream",
-            },
-            body: files[i],
-            signal: controller.signal,
-          },
-        );
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "影片上傳失敗");
-        setUploadProgress(Math.round(((i + 1) / files.length) * 100));
-      }
-      await api(`jobs/${job.id}/start`, "POST", { manual });
-      setFiles([]);
-      notify(
-        manual
-          ? "已開始抽幀，完成後請核對個體資料"
-          : "已開始分析，結果會自動更新",
-      );
-    });
-    if (controller.signal.aborted && jobId)
-      await api(`jobs/${jobId}/cancel`, "POST").catch(() => {});
-    uploadAbort.current = null;
-  }
   const living = state.pokemon.filter((p) => p.owned),
+    moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name])),
     counts = Object.fromEntries(
       Object.keys(categoryLabels).map((c) => [
         c,
         living.filter((p) => p.analysis?.category === c).length,
       ]),
     );
+  const reviewRows = living.filter((p) => p.analysis?.category === "review");
+  const reviewUnverified = reviewRows.filter((p) => !p.verified).length;
+  const reviewAnalysisLimited = reviewRows.length - reviewUnverified;
   const list = state.pokemon
     .filter(
       (p) =>
         (showArchived || p.owned) &&
         (filter === "all" || p.analysis?.category === filter) &&
         (query === "" ||
-          `${effective(p).name || ""} ${effective(p).speciesId || ""} ${effective(p).cp || ""}`
+          `${effective(p).name || ""} ${effective(p).speciesId || ""} ${catalog.species.find((s) => s.id === effective(p).speciesId)?.dex || ""} ${effective(p).cp || ""}`
             .toLowerCase()
             .includes(query.toLowerCase())),
     )
@@ -326,80 +357,110 @@ export default function Dashboard() {
               (effective(a).ivSta || 0))
           : b.createdAt.localeCompare(a.createdAt),
     );
-  const chosen = selected ? state.pokemon.find((p) => p.id === selected) : null;
-  const activeJob = state.jobs.find(
-    (j) =>
-      j.status === "processing" ||
-      (j.status === "queued" && j.stage !== "等待上傳"),
+  const visibleTransferIds = list
+    .filter((p) => p.owned && p.analysis?.category === "transfer")
+    .map((p) => p.id);
+  const pokemonById = new Map(state.pokemon.map((p) => [p.id, p]));
+  const retainedEvolutionBySpecies = new Map(
+    state.pokemon
+      .filter((p) => p.owned && p.analysis?.category === "evolve" && effective(p).speciesId)
+      .map((p) => [effective(p).speciesId!, p]),
   );
+  const retainedMaxBySpecies = new Map(
+    state.pokemon
+      .filter((p) =>
+        p.owned && ["dynamax", "gigantamax"].includes(p.maxStatus || "") &&
+        p.analysis?.reasons.includes("保留此物種的極巨化收藏代表") &&
+        effective(p).speciesId,
+      )
+      .map((p) => [effective(p).speciesId!, p]),
+  );
+  const activeCheckedTransfers = checkedTransfers.filter((id) =>
+    state.pokemon.some((p) => p.id === id && p.owned && p.analysis?.category === "transfer"),
+  );
+  const allVisibleChecked = visibleTransferIds.length > 0 &&
+    visibleTransferIds.every((id) => activeCheckedTransfers.includes(id));
+  const toggleTransfer = (id: string) => setCheckedTransfers((current) =>
+    current.includes(id) ? current.filter((row) => row !== id) : [...current, id],
+  );
+  const chosen = selected ? state.pokemon.find((p) => p.id === selected) : null;
+  const batch = phoneState?.batch;
+  const batchResumableCount = batch ? resumableTransferIndexes(batch).length : 0;
+  const batchProcessed = batch?.entries.filter((entry) =>
+    ["submitted", "confirmed", "skipped", "uncertain"].includes(entry.status),
+  ).length || 0;
+  const batchSkipped = batch?.entries.filter((entry) => entry.status === "skipped").length || 0;
+  const batchActiveEntry = batch?.entries.find((entry) =>
+    ["searching", "prepared", "sent", "unfavoriting"].includes(entry.status),
+  );
+  const batchActivePokemon = batchActiveEntry
+    ? state.pokemon.find((p) => p.id === batchActiveEntry.pokemonId)
+    : null;
+  const batchActiveName = batchActivePokemon ? effective(batchActivePokemon).name : null;
+  const batchActiveStage = batchActiveEntry?.status === "searching"
+    ? "排除背卡、核對 CP"
+    : batchActiveEntry?.status === "prepared"
+      ? "準備放生"
+      : batchActiveEntry?.status === "sent"
+        ? "已送出指令"
+        : batchActiveEntry?.status === "unfavoriting"
+          ? "取消最愛"
+          : null;
+  const batchStatusLabel = batch?.status === "approved" ? "準備開始" :
+    batch?.status === "running" ? "處理中" :
+    batch?.status === "paused" ? "已暫停" :
+    batch?.status === "completed" ? "已完成" :
+    batch?.status === "stopped" ? "已停止" : "待確認";
+  const showBatchToast = Boolean(
+    tab === "results" && batch && dismissedBatchId !== batch.id &&
+    (["approved", "running"].includes(batch.status) ||
+      trackedBatchId === batch.id ||
+      (batch.status === "paused" &&
+        Date.now() - Date.parse(batch.updatedAt) < 30 * 60_000)),
+  );
+  const phoneStatus = !phoneState
+    ? { tone: "off", label: "檢查中" }
+    : !phoneState.worker
+      ? { tone: "off", label: "服務未啟動" }
+      : phoneState.worker.ready
+        ? { tone: "ok", label: "已連線" }
+        : { tone: "warn", label: "未連線" };
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <Logo />
-        <div className="brand-caption">你的寶可夢整理工作台</div>
-        <div className="nav-label">WORKSPACE</div>
         <nav aria-label="主要功能">
           {tabs.map((t) => (
             <button
               key={t.id}
               className={`nav-item ${tab === t.id ? "active" : ""}`}
+              aria-current={tab === t.id ? "page" : undefined}
               onClick={() => navigate(t.id)}
             >
-              <t.icon size={19} />
+              <t.icon size={18} />
               <span>{t.label}</span>
-              {t.id === "results" && counts.review > 0 ? (
-                <span className="nav-count">{counts.review}</span>
-              ) : t.id === tab ? (
-                <ChevronRight size={15} />
-              ) : null}
+              {t.id === "results" && counts.review > 0 && (
+                <span className="nav-count" title="待確認">
+                  {counts.review}
+                </span>
+              )}
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <div className="note-icon">
-            <Leaf size={19} />
-          </div>
-          <strong>留給下一場冒險</strong>
-          <p>
-            清掉重複，保留潛力。
-            <br />
-            每個建議，都能查看依據。
-          </p>
-          <span>RAIDS + GO BATTLE LEAGUE</span>
-        </div>
-        <div className="local-info">
-          <span className="online-dot" />
+        <dl className="sidebar-status">
           <div>
-            <strong>本機私人工作區</strong>
-            <small>收藏資料保存在這部電腦</small>
+            <dt>iPhone</dt>
+            <dd className={phoneStatus.tone}>{phoneStatus.label}</dd>
           </div>
-          <LockKeyhole size={15} />
-        </div>
+          <div>
+            <dt>AI 辨識</dt>
+            <dd className={state.apiConfigured ? "ok" : "warn"}>
+              {state.apiConfigured ? "已設定" : "未設定"}
+            </dd>
+          </div>
+        </dl>
       </aside>
       <div className="workspace">
-        <header className="topbar">
-          <div className="breadcrumbs">
-            <span>工作台</span>
-            <ChevronRight size={13} />
-            <strong>{tabs.find((t) => t.id === tab)?.label}</strong>
-          </div>
-          <div className="topbar-right">
-            <span className="local-pill">
-              <span className="online-dot" />
-              LOCAL ONLY
-            </span>
-            <span className="separator" />
-            <button
-              className="icon-button"
-              title="重新整理"
-              aria-label="重新整理"
-              onClick={() => void refresh()}
-            >
-              <RefreshCw size={16} />
-            </button>
-            <span className="user-avatar">H</span>
-          </div>
-        </header>
         <main>
           {error && (
             <div className="alert error" role="alert">
@@ -416,454 +477,433 @@ export default function Dashboard() {
           )}
           <div className="page-heading">
             <div>
-              <div className="eyebrow">
-                {tab === "import"
-                  ? "LESS CLUTTER. MORE POTENTIAL."
-                  : tab === "results"
-                    ? "MAKE ROOM FOR YOUR NEXT CATCH."
-                    : tab === "collection"
-                      ? "YOUR COLLECTION, IN PERSPECTIVE."
-                      : "YOUR WORKSPACE. YOUR RULES."}
-              </div>
-              <h1>
-                {tab === "import" ? (
-                  <>
-                    讓每一個倉庫格，
-                    <br className="mobile-break" />
-                    都留得值得<span className="title-dot">。</span>
-                  </>
-                ) : tab === "results" ? (
-                  "把下一步，整理清楚。"
-                ) : tab === "collection" ? (
-                  "值得留下的，都在這裡。"
-                ) : (
-                  "依你的玩法，調整判斷。"
-                )}
-              </h1>
-              <p>
-                {tab === "import"
-                  ? "匯入 Pokémon GO 螢幕錄影，一次看懂收藏、對戰與培養價值。"
-                  : tab === "results"
-                    ? "先核對，再決定。比較範圍為已匯入且仍持有的個體。"
-                    : tab === "collection"
-                      ? "跨影片保存個體，讓每一次清倉都有比較依據。"
-                      : "設定資料來源、辨識服務與清倉偏好。"}
-              </p>
+              <h1>{tabs.find((t) => t.id === tab)?.label}</h1>
+              {tab === "results" && <p>只和已掃描、仍持有的寶可夢比較。</p>}
             </div>
-            {tab !== "import" && (
+            <div className="page-actions">
               <button
-                className="button primary"
-                onClick={() => navigate("import")}
+                className="icon-button bordered"
+                title="重新整理"
+                aria-label="重新整理"
+                onClick={() => void refresh()}
               >
-                <Plus size={16} />
-                匯入錄影
+                <RefreshCw size={16} />
               </button>
-            )}
+              {tab !== "iphone" && (
+                <button
+                  className="button primary"
+                  onClick={() => navigate("iphone")}
+                >
+                  <Smartphone size={16} />
+                  開始掃描
+                </button>
+              )}
+            </div>
           </div>
-          {tab !== "settings" && (
+          {tab !== "settings" && tab !== "iphone" && (
             <div className="stats-grid">
               {(
                 Object.keys(categoryLabels) as (keyof typeof categoryLabels)[]
-              ).map((category, index) => {
+              ).map((category) => {
                 const Icon = icons[category];
                 return (
                   <button
                     key={category}
-                    className={`stat-card ${category}`}
+                    className={`stat-card ${category} ${tab === "results" && filter === category ? "active" : ""}`}
+                    aria-pressed={tab === "results" && filter === category}
                     onClick={() => {
                       setTab("results");
                       setFilter(category);
                     }}
                   >
                     <div className="stat-top">
+                      <Icon size={16} />
                       <span>{categoryLabels[category]}</span>
-                      <Icon size={17} />
                     </div>
                     <div className="stat-number">
                       {loading ? (
                         <span className="skeleton-number" />
                       ) : (
-                        String(counts[category] || 0).padStart(2, "0")
+                        counts[category] || 0
                       )}
                       <span>隻</span>
                     </div>
                     <div className="stat-caption">
-                      {
-                        [
-                          "釋出空間，迎接下一隻",
-                          "特殊收藏，各留代表",
-                          "把資源花在潛力上",
-                          "補齊資料，判斷更準確",
-                        ][index]
-                      }
-                      <ArrowUpRight size={14} />
+                      {category === "review" && !loading
+                        ? `未核對 ${reviewUnverified} · 依據不足 ${reviewAnalysisLimited}`
+                        : {
+                            transfer: "沒有保留理由",
+                            collect: "異色、鎖定或收藏代表",
+                            invest: "團體戰或 PvP 有用",
+                            evolve: "進化型未登錄，同種留一隻",
+                            review: "未核對或資料不足",
+                          }[category]}
                     </div>
                   </button>
                 );
               })}
             </div>
           )}
-          {tab === "import" && (
-            <>
-              {!state.apiConfigured && (
-                <div className="api-notice">
+          {tab === "iphone" && (
+            <div className="iphone-workspace">
+              <section className="panel iphone-panel">
+                <div className="panel-heading">
                   <div>
-                    <span className="notice-dot" />
-                    <strong>接上辨識服務，就能自動分析</strong>
-                    <span>
-                      尚未設定 OpenAI API key；也可以先抽幀，人工核對。
-                    </span>
+                    <h2>手機連線</h2>
+                    <p>用 USB 連接並解鎖 iPhone，在 Pokémon GO 打開寶可夢盒子。</p>
                   </div>
-                  <button onClick={() => navigate("settings")}>
-                    前往設定
-                    <ArrowRight size={14} />
-                  </button>
+                  <span className={`status-pill ${phoneStatus.tone}`}>
+                    {phoneStatus.label}
+                  </span>
                 </div>
-              )}
-              <div className="import-grid">
-                <section className="panel upload-panel">
+                <p className="iphone-status">
+                  {phoneState?.worker
+                    ? phoneState.worker.message
+                    : "背景服務未啟動，請用 npm run dev 或 npm start 啟動。"}
+                </p>
+                <small className="muted">
+                  {phoneState?.worker?.version
+                    ? `iPhone Use ${phoneState.worker.version}`
+                    : "首次使用需先完成 iPhone Use 的裝置信任、開發者模式與 WDA 簽名。"}
+                </small>
+                <div className="iphone-actions">
+                  <button
+                    className="button secondary"
+                    disabled={!phoneState?.worker || !!busy}
+                    onClick={() =>
+                      void phoneAct("prepare-phone", async () => {
+                        await api("iphone/prepare", "POST");
+                        notify("正在檢查連線");
+                      })
+                    }
+                  >
+                    檢查連線
+                  </button>
+                  <a
+                    className="text-link"
+                    href="https://github.com/zhongerxin/iPhone-use#先在自己的-iphone-上安装并启动-wda"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    首次設定指引
+                    <ArrowUpRight size={14} />
+                  </a>
+                </div>
+              </section>
+              <section className="panel iphone-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>掃描</h2>
+                    <p>先截圖所有寶可夢，再統一辨識與分析。掃描不會放生任何寶可夢。</p>
+                  </div>
+                </div>
+                <div className="segmented" role="radiogroup" aria-label="掃描範圍">
+                  <label>
+                    <input
+                      type="radio"
+                      name="scan-scope"
+                      checked={scanScope === "results"}
+                      onChange={() => setScanScope("results")}
+                    />
+                    目前搜尋結果
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="scan-scope"
+                      checked={scanScope === "all"}
+                      onChange={() => setScanScope("all")}
+                    />
+                    整個寶可夢盒子
+                  </label>
+                </div>
+                <button
+                  className="button primary"
+                  disabled={
+                    !phoneState?.worker ||
+                    !state.apiConfigured ||
+                    !!busy ||
+                    ["queued", "running"].includes(
+                      phoneState?.scan?.status || "",
+                    ) ||
+                    ["approved", "running"].includes(
+                      phoneState?.batch?.status || "",
+                    )
+                  }
+                  onClick={() =>
+                    void phoneAct("start-phone", async () => {
+                      await api("scans", "POST", { scope: scanScope });
+                      notify("掃描已開始");
+                    })
+                  }
+                >
+                  開始掃描
+                </button>
+                {!state.apiConfigured && (
+                  <p className="job-error">
+                    請先在 .env.local 設定 OPENAI_API_KEY。
+                  </p>
+                )}
+              </section>
+              {phoneState?.scan && (
+                <section className="panel iphone-panel">
                   <div className="panel-heading">
                     <div>
-                      <h2>
-                        <span className="step-square">01</span>匯入你的錄影
-                      </h2>
-                      <p>評價頁與招式頁可分段錄製，一起匯入。</p>
+                      <h2>掃描進度</h2>
+                      <p>{phoneState.scan.stage}</p>
                     </div>
-                    <span className="subtle-tag">MP4 / MOV</span>
+                    <span className="subtle-tag">{scanStatusLabels[phoneState.scan.status]}</span>
                   </div>
-                  <input
-                    ref={input}
-                    type="file"
-                    multiple
-                    accept=".mp4,.mov,video/mp4,video/quicktime"
-                    className="visually-hidden"
-                    onChange={(e) => {
-                      acceptFiles(Array.from(e.target.files || []));
-                      e.target.value = "";
-                    }}
-                  />
-                  <div
-                    className={`dropzone ${drag ? "dragging" : ""}`}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setDrag(true);
-                    }}
-                    onDragLeave={() => setDrag(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setDrag(false);
-                      acceptFiles(Array.from(e.dataTransfer.files));
-                    }}
-                  >
-                    <span className="upload-art">
-                      <FileVideo2 size={35} strokeWidth={1.4} />
+                  <div className="iphone-metrics">
+                    <strong>{phoneState.scan.scanned} 隻已截圖</strong>
+                    <span>{phoneState.scan.analyzed ?? (phoneState.scan.phase ? 0 : phoneState.scan.scanned)} 隻已解析</span>
+                    <span>
+                      {phoneState.scan.expected === null
+                        ? "總數待確認"
+                        : `預計 ${phoneState.scan.expected} 隻`}
+                    </span>
+                    <span>{phoneState.scan.review} 隻待人工核對</span>
+                    {phoneState.scan.apiUsage.navigationRequests === undefined &&
+                    phoneState.scan.apiUsage.dataRequests === undefined ? (
                       <span>
-                        <Plus size={13} />
+                        {phoneState.scan.apiUsage.requests} 次 AI 呼叫（舊紀錄未分項）
                       </span>
-                    </span>
-                    <h3>把錄影拖曳到這裡</h3>
-                    <p>或從電腦選擇檔案，一次匯入多段影片</p>
-                    <button
-                      className="button white"
-                      disabled={busy === "upload"}
-                      onClick={() => input.current?.click()}
-                    >
-                      <Upload size={15} />
-                      選擇錄影檔案
-                    </button>
-                    <div className="file-hint">
-                      每段最多 500 MB · 最長 10 分鐘 · 每批最多 20 段
-                    </div>
+                    ) : (
+                      <>
+                        <span>{phoneState.scan.apiUsage.navigationRequests ?? 0} 次畫面判斷</span>
+                        <span>{phoneState.scan.apiUsage.dataRequests ?? 0} 次資料辨識</span>
+                      </>
+                    )}
                   </div>
-                  {files.length > 0 && (
-                    <div className="file-list">
-                      {files.map((f, i) => (
-                        <div className="file-row" key={`${f.name}-${i}`}>
-                          <FileVideo2 size={18} />
-                          <div>
-                            <strong>{f.name}</strong>
-                            <small>
-                              {(f.size / 1024 / 1024).toFixed(1)} MB
-                            </small>
-                          </div>
-                          <button
-                            className="icon-button"
-                            aria-label={`移除 ${f.name}`}
-                            disabled={busy === "upload"}
-                            onClick={() =>
-                              setFiles((items) =>
-                                items.filter((_, j) => j !== i),
-                              )
-                            }
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                  <p className="muted">
+                    範圍：
+                    {phoneState.scan.scope === "all"
+                      ? "整個盒子"
+                      : "目前搜尋結果"}{" "}
+                    · 排序：{phoneState.scan.sort || "未讀取"}
+                  </p>
+                  {phoneState.scan.error && (
+                    <p className="job-error">{phoneState.scan.error}</p>
                   )}
-                  <div className="mode-row">
-                    <label>
-                      <input
-                        type="radio"
-                        checked={!manual}
-                        onChange={() => setManual(false)}
-                      />
-                      AI 自動辨識
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        checked={manual}
-                        onChange={() => setManual(true)}
-                      />
-                      先抽幀，人工核對
-                    </label>
-                    <span>
-                      <ShieldCheck size={14} />
-                      只傳必要截圖
-                    </span>
-                  </div>
-                  <div className="upload-bottom">
-                    <span>
-                      {busy === "upload"
-                        ? `上傳中 ${uploadProgress}%`
-                        : files.length
-                          ? `已選擇 ${files.length} 段錄影`
-                          : "錄影不會整段傳到雲端"}
-                    </span>
-                    {busy === "upload" ? (
+                  {phoneState.scan.currentFrame && (
+                    <img
+                      className="iphone-frame"
+                      src={`/api/frames/${phoneState.scan.currentFrame}`}
+                      alt="目前掃描個體的來源畫面"
+                    />
+                  )}
+                  <div className="iphone-actions">
+                    {["queued", "running"].includes(phoneState.scan.status) && (
                       <button
                         className="button secondary"
-                        onClick={() => uploadAbort.current?.abort()}
-                      >
-                        <X size={15} />
-                        取消上傳
-                      </button>
-                    ) : (
-                      <button
-                        className="button primary"
-                        disabled={
-                          !files.length ||
-                          !!busy ||
-                          (!manual && !state.apiConfigured)
+                        disabled={!!busy}
+                        onClick={() =>
+                          void phoneAct("pause-scan", async () => {
+                            await api(
+                              `scans/${phoneState.scan!.id}/control`,
+                              "POST",
+                              { action: "pause" },
+                            );
+                          })
                         }
-                        onClick={() => void upload()}
                       >
-                        {manual ? "開始抽幀核對" : "開始分析"}
-                        <ArrowRight size={16} />
+                        暫停
+                      </button>
+                    )}
+                    {phoneState.scan.status === "paused" && (
+                      <button
+                        className="button secondary"
+                        disabled={!!busy}
+                        onClick={() =>
+                          void phoneAct("resume-scan", async () => {
+                            await api(
+                              `scans/${phoneState.scan!.id}/control`,
+                              "POST",
+                              { action: "resume" },
+                            );
+                          })
+                        }
+                      >
+                        {phoneState.scan.phase === "analysis" ? "繼續解析" : "繼續截圖"}
+                      </button>
+                    )}
+                    {phoneState.scan.status === "paused" &&
+                      phoneState.scan.phase !== "analysis" &&
+                      phoneState.scan.expected === null &&
+                      phoneState.scan.scanned > 0 && (
+                        <button
+                          className="button secondary"
+                          disabled={!!busy}
+                          onClick={() =>
+                            void phoneAct("finish-capture", async () => {
+                              await api(
+                                `scans/${phoneState.scan!.id}/control`,
+                                "POST",
+                                { action: "finish" },
+                              );
+                              notify("開始解析");
+                            })
+                          }
+                        >
+                          確認已到列表終點並開始解析
+                        </button>
+                      )}
+                    {["queued", "running", "paused"].includes(
+                      phoneState.scan.status,
+                    ) && (
+                      <button
+                        className="button secondary"
+                        disabled={!!busy}
+                        onClick={() =>
+                          void phoneAct("stop-scan", async () => {
+                            await api(
+                              `scans/${phoneState.scan!.id}/control`,
+                              "POST",
+                              { action: "stop" },
+                            );
+                          })
+                        }
+                      >
+                        停止
+                      </button>
+                    )}
+                    {["paused", "stopped", "failed"].includes(
+                      phoneState.scan.status,
+                    ) && (
+                      <button
+                        className="button secondary"
+                        disabled={!!busy}
+                        onClick={() =>
+                          void phoneAct("discard-scans", async () => {
+                            const result = await api<{
+                              discardedScans: number;
+                              discardedPokemon: number;
+                              frameCleanupFailed: number;
+                            }>("scans/discard", "POST");
+                            setScanScope(phoneState.scan!.scope);
+                            notify(
+                              `已清除 ${result.discardedScans} 筆未完成掃描及 ${result.discardedPokemon} 隻相關個體；請按「開始掃描」重來${result.frameCleanupFailed ? `。${result.frameCleanupFailed} 筆截圖未能清除` : ""}`,
+                            );
+                          })
+                        }
+                      >
+                        <Trash2 size={15} />
+                        清除未完成掃描並重來
                       </button>
                     )}
                   </div>
+                  {["paused", "stopped", "failed"].includes(
+                    phoneState.scan.status,
+                  ) && (
+                    <p className="muted">
+                      清除後請在遊戲返回寶可夢盒子列表，再按上方「開始掃描」。
+                    </p>
+                  )}
                 </section>
-                <section className="panel recording-guide">
-                  <div className="guide-label">
-                    <Film size={16} />
-                    一段好錄影，讓判斷更準確
-                  </div>
-                  <div
-                    className="phone-illustration"
-                    aria-label="評價頁錄影示意"
-                  >
-                    <div className="phone-notch" />
-                    <div className="phone-cp">CP 1,482</div>
-                    <div className="phone-arc" />
-                    <div className="pokemon-placeholder">
-                      <Layers3 size={42} strokeWidth={1} />
-                    </div>
-                    <div className="phone-sheet">
-                      <span>寶可夢評價</span>
-                      <div className="tiny-hp" />
-                      <div className="iv-demo">
-                        {[80, 100, 93].map((width, i) => (
-                          <div key={i}>
-                            <small>{["攻擊", "防禦", "HP"][i]}</small>
-                            <span>
-                              <i style={{ width: `${width}%` }} />
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <span className="phone-caption">評價頁示意</span>
-                    <div className="guide-callout">
-                      <CheckCircle2 size={14} />
-                      保持 IV 評價條清楚
-                    </div>
-                  </div>
-                  <ol className="guide-steps">
-                    <li>
-                      <span>1</span>
-                      <div>
-                        <strong>開啟隊長評價，逐隻切換</strong>
-                        <p>每隻停留約 1～2 秒，等評價條穩定。</p>
-                      </div>
-                    </li>
-                    <li>
-                      <span>2</span>
-                      <div>
-                        <strong>另外錄下能力與招式</strong>
-                        <p>滑動顯示招式與成本，可補齊培養建議。</p>
-                      </div>
-                    </li>
-                    <li>
-                      <span>3</span>
-                      <div>
-                        <strong>一起匯入，核對後再清倉</strong>
-                        <p>不需相同順序，不確定的配對會留給你確認。</p>
-                      </div>
-                    </li>
-                  </ol>
-                </section>
-              </div>
-              <section className="workflow-strip">
-                <div>
-                  <span className="workflow-icon">
-                    <Upload size={20} />
-                  </span>
-                  <div>
-                    <small>01 / IMPORT</small>
-                    <strong>匯入螢幕錄影</strong>
-                  </div>
-                </div>
-                <ChevronRight size={17} />
-                <div>
-                  <span className="workflow-icon">
-                    <ScanSymbol />
-                  </span>
-                  <div>
-                    <small>02 / REVIEW</small>
-                    <strong>辨識、配對與核對</strong>
-                  </div>
-                </div>
-                <ChevronRight size={17} />
-                <div>
-                  <span className="workflow-icon">
-                    <Swords size={20} />
-                  </span>
-                  <div>
-                    <small>03 / DECIDE</small>
-                    <strong>看懂價值，再決定</strong>
-                  </div>
-                </div>
-              </section>
-              <div className="section-title">
-                <h2>
-                  最近的分析
-                  <span>
-                    {state.jobs.length
-                      ? String(state.jobs.length).padStart(2, "0")
-                      : ""}
-                  </span>
-                </h2>
-                <button
-                  className="text-button"
-                  onClick={() => navigate("results")}
-                >
-                  查看清倉結果
-                  <ArrowRight size={14} />
-                </button>
-              </div>
-              <div className="panel jobs-panel">
-                {state.jobs.length ? (
-                  state.jobs.slice(0, 8).map((j) => (
-                    <div className="job-row" key={j.id}>
-                      <span className={`job-icon ${j.status}`}>
-                        <FileVideo2 size={22} />
-                      </span>
-                      <div className="job-details">
-                        <strong>{j.name}</strong>
-                        <small>
-                          {date(j.createdAt)} · {j.files.length} 段錄影 ·{" "}
-                          {j.stage}
-                        </small>
-                        {j.status === "processing" && (
-                          <div className="progress-track">
-                            <i style={{ width: `${j.progress}%` }} />
-                          </div>
-                        )}
-                        {j.error && <p className="job-error">{j.error}</p>}
-                        <small>
-                          {j.usage.requests > 0
-                            ? `${number(j.usage.input)} 輸入 / ${number(j.usage.output)} 輸出 tokens · ${j.usage.cached} 次快取`
-                            : ""}
-                        </small>
-                      </div>
-                      <div className="job-actions">
-                        {j.status === "processing" ? (
-                          <>
-                            <span className="processing">
-                              <LoaderCircle size={13} className="spin" />
-                              {j.progress}%
-                            </span>
-                            <button
-                              className="icon-button"
-                              title="取消"
-                              onClick={() =>
-                                void act("cancel", async () => {
-                                  await api(`jobs/${j.id}/cancel`, "POST");
-                                })
-                              }
-                            >
-                              <X size={16} />
-                            </button>
-                          </>
-                        ) : j.status === "failed" ||
-                          j.status === "cancelled" ? (
-                          <button
-                            className="button small secondary"
-                            disabled={!!busy}
-                            onClick={() =>
-                              void act("retry", async () => {
-                                await api(`jobs/${j.id}/start`, "POST", {
-                                  manual,
-                                });
-                              })
-                            }
-                          >
-                            <RefreshCw size={13} />
-                            重試
-                          </button>
-                        ) : j.stage === "等待上傳" ? (
-                          <button
-                            className="text-button"
-                            onClick={() =>
-                              void act("cancel", async () => {
-                                await api(`jobs/${j.id}/cancel`, "POST");
-                              })
-                            }
-                          >
-                            移除未完成上傳
-                          </button>
-                        ) : (
-                          <button
-                            className="text-button"
-                            onClick={() => navigate("results")}
-                          >
-                            核對結果
-                            <ChevronRight size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="empty-jobs">
-                    <span>
-                      <Clock3 size={22} />
-                    </span>
-                    <div>
-                      <strong>你的第一份分析，從一段錄影開始</strong>
-                      <p>分析紀錄與核對進度會保存在這裡。</p>
-                    </div>
-                    <span className="empty-label">READY WHEN YOU ARE</span>
-                  </div>
-                )}
-              </div>
-            </>
+              )}
+
+            </div>
           )}
           {(tab === "results" || tab === "collection") && (
             <>
+              {tab === "results" && batch && (
+                <section className="panel iphone-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>放生進度</h2>
+                      <p>特殊背卡或無法確認身分的寶可夢會自動跳過。</p>
+                    </div>
+                    <span className="subtle-tag">{batchStatusLabel}</span>
+                  </div>
+                  <p className="muted">
+                    已處理 {batchProcessed} / {batch.entries.length} 隻 · 跳過 {batchSkipped} 隻
+                  </p>
+                  {batch.error && <p className="job-error">{batch.error}</p>}
+                  {batchResumableCount > 0 && (
+                    <p className="muted">先在手機返回寶可夢盒子列表，再按「繼續」；已送出的個體不會重送。</p>
+                  )}
+                  <details>
+                    <summary>查看逐隻紀錄</summary>
+                    <div className="iphone-candidates">
+                      {batch.entries.map((entry, index) => {
+                        const pokemon = state.pokemon.find((row) => row.id === entry.pokemonId);
+                        if (!pokemon) return null;
+                        const f = effective(pokemon);
+                        return (
+                          <div className="iphone-candidate" key={`${entry.pokemonId}-${index}`}>
+                            {pokemon.sources[0]?.frame && (
+                              <img
+                                src={`/api/frames/${pokemon.sources[0].frame}`}
+                                alt={`${f.name || "寶可夢"}來源畫面`}
+                              />
+                            )}
+                            <div>
+                              <strong>{f.name || f.speciesId} · CP {f.cp ?? "?"}</strong>
+                              <small>{entryStatusLabels[entry.status]}</small>
+                              {entry.reason && <small>{entry.reason}</small>}
+                            </div>
+                            <button className="button small secondary" onClick={() => setSelected(pokemon.id)}>
+                              查看來源
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                  {batchResumableCount > 0 && (
+                    <button
+                      className="button"
+                      disabled={!!busy}
+                      onClick={() => void phoneAct("resume-transfer", async () => {
+                        const resumed = await api<TransferBatch>(`transfers/${batch.id}/resume`, "POST");
+                        setTrackedBatchId(resumed.id);
+                        setDismissedBatchId(null);
+                        notify(`繼續放生剩餘 ${batchResumableCount} 隻`);
+                      })}
+                    >
+                      繼續放生剩餘 {batchResumableCount} 隻
+                    </button>
+                  )}
+                  {["approved", "running", "paused"].includes(batch.status) && (
+                    <button
+                      className="button secondary"
+                      disabled={!!busy}
+                      onClick={() => void phoneAct("stop-transfer", async () => {
+                        await api(`transfers/${batch.id}/stop`, "POST");
+                      })}
+                    >
+                      停止批次
+                    </button>
+                  )}
+                </section>
+              )}
+              {tab === "results" && phoneState?.resumableBatches?.some((row) => row.id !== batch?.id) && (
+                <section className="panel iphone-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>先前暫停的放生</h2>
+                      <p>可繼續原批次中尚未送出的個體，無須重新勾選。</p>
+                    </div>
+                  </div>
+                  {phoneState.resumableBatches.filter((row) => row.id !== batch?.id).map((row) => (
+                    <div className="iphone-candidate" key={row.id}>
+                      <span>已處理 {row.entries.filter((entry) => ["submitted", "confirmed", "skipped", "uncertain"].includes(entry.status)).length}/{row.entries.length} · {row.resumeBlocked || row.error}</span>
+                      <button
+                        className="button small"
+                        disabled={!!busy || !!row.resumeBlocked || ["approved", "running"].includes(batch?.status || "")}
+                        onClick={() => void phoneAct("resume-transfer", async () => {
+                          const resumed = await api<TransferBatch>(`transfers/${row.id}/resume`, "POST");
+                          setTrackedBatchId(resumed.id);
+                          setDismissedBatchId(null);
+                          notify(`繼續放生剩餘 ${resumableTransferIndexes(row).length} 隻`);
+                        })}
+                      >
+                        繼續放生剩餘 {resumableTransferIndexes(row).length} 隻
+                      </button>
+                    </div>
+                  ))}
+                </section>
+              )}
               <div className="panel results-panel">
                 <div className="results-toolbar">
                   <div className="filter-tabs">
@@ -874,7 +914,7 @@ export default function Dashboard() {
                         onClick={() => setFilter(c)}
                       >
                         {c === "all"
-                          ? "全部個體"
+                          ? "全部"
                           : categoryLabels[c as keyof typeof categoryLabels]}
                         <span>
                           {c === "all" ? living.length : counts[c] || 0}
@@ -888,12 +928,12 @@ export default function Dashboard() {
                     onClick={() =>
                       void act("evaluate", async () => {
                         await api("reevaluate", "POST");
-                        notify("已依目前收藏庫重新評估");
+                        notify("已重新計算建議");
                       })
                     }
                   >
                     <RefreshCw size={14} />
-                    重新評估
+                    重新計算建議
                   </button>
                 </div>
                 <div className="search-toolbar">
@@ -902,7 +942,7 @@ export default function Dashboard() {
                     <input
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
-                      placeholder="搜尋名稱、物種 ID 或 CP"
+                      placeholder="搜尋名稱、全國圖鑑編號或 CP"
                     />
                   </label>
                   <div className="list-controls">
@@ -919,7 +959,7 @@ export default function Dashboard() {
                       value={sort}
                       onChange={(e) => setSort(e.target.value)}
                     >
-                      <option value="recent">最近匯入</option>
+                      <option value="recent">最近掃描</option>
                       <option value="cp">CP 由高到低</option>
                       <option value="iv">IV 總和由高到低</option>
                     </select>
@@ -933,22 +973,73 @@ export default function Dashboard() {
                     </a>
                   </div>
                 </div>
+                {tab === "results" && (
+                  <div className="transfer-selection-bar">
+                    <span>
+                      已勾選 <strong>{activeCheckedTransfers.length}</strong> 隻
+                    </span>
+                    <button
+                      className="button small secondary"
+                      disabled={!activeCheckedTransfers.length || !!busy}
+                      onClick={() => setCheckedTransfers([])}
+                    >
+                      清除勾選
+                    </button>
+                    <button
+                      className="button small danger"
+                      disabled={
+                        !activeCheckedTransfers.length || !!busy ||
+                        ["approved", "running"].includes(phoneState?.batch?.status || "")
+                      }
+                      onClick={() => startSelectedTransfers(activeCheckedTransfers)}
+                    >
+                      放生勾選的 {activeCheckedTransfers.length} 隻
+                    </button>
+                  </div>
+                )}
                 {list.length ? (
                   <div className="table-scroll">
                     <table>
                       <thead>
                         <tr>
+                          {tab === "results" && (
+                            <th className="transfer-check-cell">
+                              <input
+                                type="checkbox"
+                                aria-label="勾選目前顯示的可放生寶可夢"
+                                checked={allVisibleChecked}
+                                disabled={!visibleTransferIds.length}
+                                onChange={() => setCheckedTransfers((current) =>
+                                  allVisibleChecked
+                                    ? current.filter((id) => !visibleTransferIds.includes(id))
+                                    : [...new Set([...current, ...visibleTransferIds])],
+                                )}
+                              />
+                            </th>
+                          )}
                           <th>寶可夢</th>
                           <th>CP / IV</th>
                           <th>建議分類</th>
                           <th>判斷依據</th>
-                          <th>核對狀態</th>
+                          <th>核對</th>
                           <th />
                         </tr>
                       </thead>
                       <tbody>
                         {list.map((p) => {
                           const f = effective(p);
+                          const retainedEvolution = p.analysis?.category === "transfer" && f.speciesId
+                            ? (p.analysis.comparedWith
+                                .map((id) => pokemonById.get(id))
+                                .find((peer) =>
+                                  peer?.owned && peer.analysis?.category === "evolve" &&
+                                  effective(peer).speciesId === f.speciesId,
+                                ) || retainedEvolutionBySpecies.get(f.speciesId))
+                            : null;
+                          const retainedMax = p.analysis?.category === "transfer" &&
+                            ["dynamax", "gigantamax"].includes(p.maxStatus || "") && f.speciesId
+                              ? retainedMaxBySpecies.get(f.speciesId)
+                              : null;
                           return (
                             <tr
                               key={p.id}
@@ -958,17 +1049,23 @@ export default function Dashboard() {
                                 if (e.key === "Enter") setSelected(p.id);
                               }}
                             >
+                              {tab === "results" && (
+                                <td className="transfer-check-cell">
+                                  {p.owned && p.analysis?.category === "transfer" && (
+                                    <input
+                                      type="checkbox"
+                                      aria-label={`勾選 ${f.name || f.speciesId || "寶可夢"} CP ${f.cp ?? "未知"}`}
+                                      checked={activeCheckedTransfers.includes(p.id)}
+                                      onClick={(event) => event.stopPropagation()}
+                                      onKeyDown={(event) => event.stopPropagation()}
+                                      onChange={() => toggleTransfer(p.id)}
+                                    />
+                                  )}
+                                </td>
+                              )}
                               <td>
                                 <div className="pokemon-cell">
-                                  <div className="pokemon-token">
-                                    {p.locked ? (
-                                      <LockKeyhole size={20} />
-                                    ) : f.shadow ? (
-                                      <span>◈</span>
-                                    ) : (
-                                      <Layers3 size={23} />
-                                    )}
-                                  </div>
+                                  <PokemonSprite pokemon={p} />
                                   <div>
                                     <strong>
                                       {f.name ||
@@ -977,9 +1074,17 @@ export default function Dashboard() {
                                         )?.name ||
                                         "待辨識個體"}
                                       {f.shiny && <Sparkles size={12} />}
+                                      {p.maxStatus === "dynamax" && " · 極巨化"}
+                                      {p.maxStatus === "gigantamax" && " · 超極巨化"}
+                                      {f.favorite === true && (
+                                        <span className="favorite-label" title="遊戲內最愛">
+                                          <Star size={12} fill="currentColor" />
+                                          最愛
+                                        </span>
+                                      )}
                                     </strong>
                                     <small>
-                                      {f.speciesId || "尚未指定物種"}
+                                      {speciesLabel(catalog, f.speciesId, f.name)}
                                       {!p.owned ? " · 已放生" : ""}
                                     </small>
                                   </div>
@@ -1004,9 +1109,35 @@ export default function Dashboard() {
                                 <Status
                                   category={p.analysis?.category || "review"}
                                 />
+                                {retainedEvolution && (
+                                  <button
+                                    className="retained-evolution-link"
+                                    title="查看已保留的可進化個體"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelected(retainedEvolution.id);
+                                    }}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    已保留 1 隻可進化（CP {effective(retainedEvolution).cp ?? "?"}）
+                                  </button>
+                                )}
+                                {retainedMax && retainedMax.id !== p.id && (
+                                  <button
+                                    className="retained-evolution-link"
+                                    title="查看已保留的極巨化個體"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelected(retainedMax.id);
+                                    }}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    已保留 1 隻極巨化（CP {effective(retainedMax).cp ?? "?"}）
+                                  </button>
+                                )}
                               </td>
                               <td className="reason-cell">
-                                {p.analysis?.reasons[0] || "等待分析"}
+                                {localizeMoveText(p.analysis?.reasons[0] || "等待分析", moveNames)}
                                 <small>{p.sources.length} 張來源畫面</small>
                               </td>
                               <td>
@@ -1022,6 +1153,24 @@ export default function Dashboard() {
                                 </span>
                               </td>
                               <td>
+                                {p.owned && p.analysis?.category === "transfer" && (
+                                  <button
+                                    className="button small danger-outline"
+                                    disabled={
+                                      !!busy ||
+                                      ["approved", "running"].includes(
+                                        phoneState?.batch?.status || "",
+                                      )
+                                    }
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      startSingleTransfer(p.id);
+                                    }}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    放生
+                                  </button>
+                                )}
                                 <ChevronRight size={17} />
                               </td>
                             </tr>
@@ -1037,37 +1186,39 @@ export default function Dashboard() {
                     </div>
                     <h3>
                       {state.pokemon.length
-                        ? "沒有符合條件的個體"
-                        : "收藏的全貌，從這裡開始"}
+                        ? "沒有符合條件的寶可夢"
+                        : "還沒有掃描資料"}
                     </h3>
                     <p>
                       {state.pokemon.length
-                        ? "試著切換分類或搜尋條件。"
-                        : "匯入錄影後，在這裡查看每一隻的去留與培養建議。"}
+                        ? "換個分類或搜尋條件試試。"
+                        : "用 iPhone 掃描後，結果會列在這裡。"}
                     </p>
-                    <button
-                      className="button primary"
-                      onClick={() => navigate("import")}
-                    >
-                      <Plus size={15} />
-                      匯入第一段錄影
-                    </button>
+                    {!state.pokemon.length && (
+                      <button
+                        className="button primary"
+                        onClick={() => navigate("iphone")}
+                      >
+                        <Smartphone size={16} />
+                        開始掃描
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="table-footer">
-                  <span>共 {list.length} 隻 · 僅比較本機已匯入收藏</span>
+                  <span>共 {list.length} 隻</span>
                   <span>
-                    <Info size={13} />
-                    資料不足的個體維持待確認
+                    像素圖：
+                    <a
+                      href="https://github.com/PokeAPI/sprites"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      PokéAPI Sprites
+                    </a>
                   </span>
                 </div>
               </div>
-              {activeJob && (
-                <div className="alert">
-                  <LoaderCircle size={16} className="spin" />
-                  <span>正在分析：{activeJob.stage}，完成後將自動更新。</span>
-                </div>
-              )}
             </>
           )}
           {tab === "settings" && (
@@ -1082,10 +1233,6 @@ export default function Dashboard() {
           )}
           <footer className="page-footer">
             <span>
-              <Leaf size={13} />
-              留下潛力，讓冒險繼續。
-            </span>
-            <span>
               {state.snapshot
                 ? `遊戲資料 ${state.snapshot.sourceDate.split(" ")[0]} · ${number(state.snapshot.count)} 種物種／形態`
                 : "尚未載入遊戲資料"}
@@ -1094,8 +1241,45 @@ export default function Dashboard() {
           </footer>
         </main>
       </div>
+      {showBatchToast && batch && (
+        <div className="toast transfer-progress-toast" role="status" aria-live="polite">
+          <span>
+            放生{batchStatusLabel} · 已處理 {batchProcessed}/{batch.entries.length}
+            {batchSkipped ? ` · 跳過 ${batchSkipped}` : ""}
+            {batchActiveName ? ` · 目前 ${batchActiveName}${batchActiveStage ? `：${batchActiveStage}` : ""}` : ""}
+            {batch.error ? ` · ${batch.error}` : ""}
+          </span>
+          {["approved", "running"].includes(batch.status) ? (
+            <button
+              className="transfer-toast-button"
+              disabled={!!busy}
+              onClick={() => void phoneAct("stop-transfer", async () => {
+                await api(`transfers/${batch.id}/stop`, "POST");
+              })}
+            >
+              停止
+            </button>
+          ) : batchResumableCount > 0 ? (
+            <button
+              className="transfer-toast-button"
+              disabled={!!busy}
+              onClick={() => void phoneAct("resume-transfer", async () => {
+                const resumed = await api<TransferBatch>(`transfers/${batch.id}/resume`, "POST");
+                setTrackedBatchId(resumed.id);
+                setDismissedBatchId(null);
+              })}
+            >
+              繼續
+            </button>
+          ) : (
+            <button className="transfer-toast-button" onClick={() => setDismissedBatchId(batch.id)}>
+              關閉
+            </button>
+          )}
+        </div>
+      )}
       {toast && (
-        <div className="toast" role="status">
+        <div className={`toast ${showBatchToast ? "toast-stacked" : ""}`} role="status">
           <CheckCircle2 size={17} />
           {toast}
         </div>
@@ -1111,7 +1295,7 @@ export default function Dashboard() {
           onSave={async (data) => {
             await act("save", async () => {
               await api(`pokemon/${chosen.id}`, "PATCH", data);
-              notify("個體已更新，已重新評估收藏庫");
+              notify("已儲存並重新評估");
             });
           }}
           onMerge={async (source) => {
@@ -1126,16 +1310,6 @@ export default function Dashboard() {
     </div>
   );
 }
-function ScanSymbol() {
-  return (
-    <span className="scan-symbol">
-      <i />
-      <i />
-      <i />
-    </span>
-  );
-}
-
 function SettingsView({
   state,
   onAction,
@@ -1164,11 +1338,7 @@ function SettingsView({
   return (
     <div className="settings-grid">
       <section className="panel settings-card">
-        <div className="settings-icon">
-          <Sparkles size={21} />
-        </div>
-        <h2>畫面辨識服務</h2>
-        <p>OpenAI API key 僅由本機後端讀取，不儲存在瀏覽器。</p>
+        <h2>AI 辨識（OpenAI）</h2>
         <div
           className={`connection-state ${state.apiConfigured ? "connected" : ""}`}
         >
@@ -1180,12 +1350,11 @@ function SettingsView({
           <li>
             在專案根目錄建立 <code>.env.local</code>
           </li>
-          <li>填入自己的 key 與模型名稱：</li>
+          <li>填入 key 與模型：</li>
         </ol>
-        <pre>OPENAI_API_KEY=你的_API_key{"\n"}OPENAI_MODEL=gpt-4.1-mini</pre>
+        <pre>OPENAI_API_KEY=你的_API_key{"\n"}OPENAI_MODEL=gpt-4.1-mini{"\n"}# 使用相容伺服器時設定：{"\n"}# OPENAI_BASE_URL=http://127.0.0.1:1234/v1</pre>
         <p className="caption">
-          儲存後重新啟動 <code>npm run dev</code>。呼叫 API
-          會依實際用量計費；未設定時可先使用人工核對模式。
+          儲存後重新啟動 <code>npm run dev</code>。API 依用量計費。
         </p>
         <a
           className="text-link"
@@ -1198,11 +1367,8 @@ function SettingsView({
         </a>
       </section>
       <section className="panel settings-card">
-        <div className="settings-icon">
-          <Database size={21} />
-        </div>
-        <h2>遊戲資料快照</h2>
-        <p>更新後重新評估現有收藏；更新失敗會保留舊版本。</p>
+        <h2>遊戲資料</h2>
+        <p>更新後會重新評估收藏；失敗時保留舊版本。</p>
         {state.snapshot ? (
           <div className="snapshot-details">
             <div>
@@ -1210,7 +1376,7 @@ function SettingsView({
               <strong>{state.snapshot.sourceDate}</strong>
             </div>
             <div>
-              <span>本機更新時間</span>
+              <span>更新時間</span>
               <strong>{date(state.snapshot.updatedAt)}</strong>
             </div>
             <div>
@@ -1264,15 +1430,11 @@ function SettingsView({
         </details>
       </section>
       <section className="panel settings-card">
-        <div className="settings-icon">
-          <SlidersHorizontal size={21} />
-        </div>
-        <h2>清倉與培養偏好</h2>
-        <p>積極清倉，各留收藏代表；優先培養立即有用的個體。</p>
+        <h2>清倉規則</h2>
         <div className="preference-fields">
           {(
             [
-              { key: "raidSlots", label: "每種攻擊屬性保留隊伍名額", max: 6 },
+              { key: "raidSlots", label: "每種攻擊屬性保留名額（12 隻可留二軍）", max: 24 },
               { key: "metaCutoff", label: "PvP 環境排名門檻", max: 300 },
               { key: "ivCutoff", label: "PvP 個體 IV 排名門檻", max: 4096 },
               {
@@ -1314,32 +1476,29 @@ function SettingsView({
         </button>
       </section>
       <section className="panel settings-card">
-        <div className="settings-icon">
-          <HardDrive size={21} />
-        </div>
-        <h2>你的收藏，存在本機</h2>
-        <p>
-          備份包含個體、人工修正、資料快照與來源截圖；不包含原始影片或 API key。
-        </p>
+        <h2>備份與還原</h2>
+        <p>JSON 備份包含寶可夢紀錄、人工修正、遊戲資料、掃描紀錄與截圖，不含 API key。</p>
         <div className="storage-summary">
-          <strong>
-            {state.pokemon.length}
-            <span>個體紀錄</span>
-          </strong>
-          <strong>
-            {state.jobs.length}
-            <span>分析工作</span>
-          </strong>
+          <strong>{state.pokemon.length}</strong>
+          <span>筆寶可夢紀錄</span>
         </div>
         <div className="button-row">
           <a className="button secondary" href="/api/export">
             <ArrowDownToLine size={15} />
-            JSON 完整備份
+            匯出 JSON 備份
           </a>
           <a className="button secondary" href="/api/export?format=csv">
             <ArrowDownToLine size={15} />
-            CSV 清單
+            匯出 CSV
           </a>
+          <button
+            className="button secondary"
+            disabled={!!busy}
+            onClick={() => backupInput.current?.click()}
+          >
+            <Upload size={15} />
+            匯入 JSON 備份
+          </button>
         </div>
         <input
           ref={backupInput}
@@ -1365,20 +1524,7 @@ function SettingsView({
             e.target.value = "";
           }}
         />
-        <button
-          className="text-button restore-button"
-          disabled={!!busy}
-          onClick={() => backupInput.current?.click()}
-        >
-          <Upload size={14} />
-          匯入 JSON 備份
-        </button>
-        <div className="privacy-note">
-          <ShieldCheck size={17} />
-          <span>
-            本機服務僅開放 127.0.0.1。匯入備份時，既有個體與人工修正不會被覆蓋。
-          </span>
-        </div>
+        <p className="caption">匯入時不會覆蓋既有紀錄與人工修正。</p>
       </section>
     </div>
   );
@@ -1407,6 +1553,12 @@ function PokemonDrawer({
     [fields, setFields] = useState<Fields>(effective(p)),
     [source, setSource] = useState(0),
     [verified, setVerified] = useState(p.verified),
+    [evolutionSilhouette, setEvolutionSilhouette] = useState<boolean | null>(
+      p.evolutionSilhouette ?? null,
+    ),
+    [maxStatus, setMaxStatus] = useState<Pokemon["maxStatus"]>(
+      p.maxStatus ?? null,
+    ),
     [dismiss, setDismiss] = useState(false),
     [proofError, setProofError] = useState(false);
   const closeButton = useRef<HTMLButtonElement>(null),
@@ -1414,6 +1566,8 @@ function PokemonDrawer({
   useEffect(() => {
     setFields(effective(p));
     setVerified(p.verified);
+    setEvolutionSilhouette(p.evolutionSilhouette ?? null);
+    setMaxStatus(p.maxStatus ?? null);
     setDismiss(false);
   }, [p.id, p.updatedAt, p.verified, p.locked, p.owned]);
   useEffect(() => {
@@ -1450,7 +1604,8 @@ function PokemonDrawer({
     };
   }, [onClose]);
   const a = p.analysis,
-    activeSource = p.sources[Math.min(source, p.sources.length - 1)];
+    activeSource = p.sources[Math.min(source, p.sources.length - 1)],
+    moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
   const changes = Object.fromEntries(
     (Object.keys(fields) as (keyof Fields)[])
       .filter((key) => fields[key] !== effective(p)[key])
@@ -1493,7 +1648,7 @@ function PokemonDrawer({
             <option value="">選擇物種／形態</option>
             {catalog.species.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name} · {s.id}
+                #{s.dex} {s.name}
               </option>
             ))}
           </select>
@@ -1524,7 +1679,7 @@ function PokemonDrawer({
           <>
             <input
               list="move-options"
-              value={String(fields[key] ?? "")}
+              value={fields[key] ? moveName(String(fields[key]), moveNames) : ""}
               placeholder="未顯示／未知"
               onChange={(e) => set(key, e.target.value || null)}
             />
@@ -1575,13 +1730,12 @@ function PokemonDrawer({
       >
         <div className="drawer-heading">
           <div>
-            <span className="eyebrow">POKÉMON DETAIL</span>
             <h2 id="drawer-title">
               {fields.name || "待辨識個體"}
               <Status category={a?.category || "review"} />
             </h2>
             <p>
-              {fields.speciesId || "請選擇正確物種"} · {p.sources.length}{" "}
+              {speciesLabel(catalog, fields.speciesId, fields.name)} · {p.sources.length}{" "}
               張來源畫面
             </p>
           </div>
@@ -1670,7 +1824,7 @@ function PokemonDrawer({
                   {activeSource && !proofError ? (
                     <img
                       src={`/api/frames/${activeSource.frame}`}
-                      alt={`${activeSource.video} ${activeSource.time} 秒來源截圖`}
+                      alt={`${sourceName(activeSource)} ${sourceTime(activeSource)} 來源截圖`}
                       onError={() => setProofError(true)}
                     />
                   ) : (
@@ -1681,8 +1835,8 @@ function PokemonDrawer({
                   )}
                   {activeSource && (
                     <div>
-                      <strong>{activeSource.time.toFixed(2)} 秒</strong>
-                      <small>{activeSource.video}</small>
+                      <strong>{sourceTime(activeSource)}</strong>
+                      <small>{sourceName(activeSource)}</small>
                       <button
                         className="text-button"
                         onClick={() => setSection("sources")}
@@ -1728,6 +1882,44 @@ function PokemonDrawer({
                       "chargeMove2",
                     ] as (keyof Fields)[]
                   ).map(editor)}
+                  <label className="edit-field">
+                    <span>進化按鈕剪影</span>
+                    <select
+                      value={
+                        evolutionSilhouette === null
+                          ? ""
+                          : String(evolutionSilhouette)
+                      }
+                      onChange={(event) =>
+                        setEvolutionSilhouette(
+                          event.target.value === ""
+                            ? null
+                            : event.target.value === "true",
+                        )
+                      }
+                    >
+                      <option value="">未能確認</option>
+                      <option value="true">未登錄剪影</option>
+                      <option value="false">彩色圖示</option>
+                    </select>
+                    <small>從招式頁的進化按鈕判定；多分支進化暫不自動分類。</small>
+                  </label>
+                  <label className="edit-field">
+                    <span>極巨化狀態</span>
+                    <select
+                      value={maxStatus ?? ""}
+                      onChange={(event) => setMaxStatus(
+                        event.target.value === "" ? null :
+                        event.target.value as "none" | "dynamax" | "gigantamax",
+                      )}
+                    >
+                      <option value="">未能確認</option>
+                      <option value="none">一般個體</option>
+                      <option value="dynamax">極巨化</option>
+                      <option value="gigantamax">超極巨化</option>
+                    </select>
+                    <small>依能力頁上的極巨化徽章判定；可在此人工修正。</small>
+                  </label>
                   <details className="cost-edit">
                     <summary>
                       資源與畫面顯示成本
@@ -1752,7 +1944,7 @@ function PokemonDrawer({
                   </details>
                   <datalist id="move-options">
                     {catalog.moves.map((m) => (
-                      <option key={m.id} value={m.id}>
+                      <option key={m.id} value={m.name}>
                         {m.name}
                       </option>
                     ))}
@@ -1776,21 +1968,23 @@ function PokemonDrawer({
           )}
           {section === "analysis" && (
             <div className="analysis-content">
-              <div className="decision-card">
+              <div className={`decision-card ${a?.category || "review"}`}>
                 <Status category={a?.category || "review"} />
                 <h3>
                   {a?.category === "transfer"
-                    ? "這一隻，可以釋出空間。"
+                    ? "建議放生"
                     : a?.category === "invest"
-                      ? "這一隻，值得留下培養。"
+                      ? "建議保留培養"
                       : a?.category === "collect"
-                        ? "留下這位收藏代表。"
-                        : "先補齊資訊，再下結論。"}
+                        ? "建議保留收藏"
+                        : a?.category === "evolve"
+                          ? "建議進化（進化型未登錄）"
+                          : "資料不足，請先核對"}
                 </h3>
                 {a?.reasons.map((r, i) => (
                   <p key={i}>
                     <Check size={14} />
-                    {r}
+                    {localizeMoveText(r, moveNames)}
                   </p>
                 ))}
               </div>
@@ -1798,12 +1992,12 @@ function PokemonDrawer({
                 <section className="analysis-section">
                   <h3>
                     <ArrowUpRight size={17} />
-                    下一步培養路線
+                    培養步驟
                   </h3>
                   {a.actions.map((action, i) => (
                     <p className="action-item" key={i}>
                       <span>{i + 1}</span>
-                      {action}
+                      {localizeMoveText(action, moveNames)}
                     </p>
                   ))}
                 </section>
@@ -1869,11 +2063,11 @@ function PokemonDrawer({
                         {l.moves
                           .map(
                             (m) =>
-                              catalog.moves.find((x) => x.id === m)?.name || m,
+                              moveName(m, moveNames),
                           )
                           .join("／") || "資料不足"}
                         {l.elite.length
-                          ? ` · 限定招式 ${l.elite.join("、")}`
+                          ? ` · 限定招式 ${l.elite.map((m) => moveName(m, moveNames)).join("、")}`
                           : ""}
                       </p>
                       <details>
@@ -1907,16 +2101,14 @@ function PokemonDrawer({
                         <div>
                           <strong>{r.name}</strong>
                           <span className="subtle-tag">
-                            {typeNames[r.type] || r.type} · 物種 #{r.rank}
+                            {typeName(r.type)} · 物種 #{r.rank}
                           </span>
                         </div>
                         <p>
                           Lv.35 基準 DPS <b>{r.dps.toFixed(2)}</b> ·{" "}
-                          {catalog.moves.find((x) => x.id === r.fast)?.name ||
-                            r.fast}{" "}
+                          {moveName(r.fast, moveNames)}{" "}
                           /{" "}
-                          {catalog.moves.find((x) => x.id === r.charge)?.name ||
-                            r.charge}
+                          {moveName(r.charge, moveNames)}
                         </p>
                         {r.targets.map((t) => (
                           <div className="raid-target" key={t.level}>
@@ -1934,7 +2126,7 @@ function PokemonDrawer({
                         )}
                         {r.elite.length > 0 && (
                           <p className="warning-text">
-                            包含限定招式：{r.elite.join("、")}
+                            包含限定招式：{r.elite.map((m) => moveName(m, moveNames)).join("、")}
                             ；請確認厲害招式學習器或活動條件。
                           </p>
                         )}
@@ -1970,7 +2162,7 @@ function PokemonDrawer({
                   </h3>
                   <ul>
                     {a.warnings.map((w) => (
-                      <li key={w}>{w}</li>
+                      <li key={w}>{localizeMoveText(w, moveNames)}</li>
                     ))}
                   </ul>
                 </div>
@@ -1980,7 +2172,7 @@ function PokemonDrawer({
                 快照 {a?.snapshot || "尚無資料"} ·{" "}
                 {a ? date(a.evaluatedAt) : "尚未評估"}
                 <p>
-                  比較範圍：本機已匯入且仍持有的個體。
+                  比較範圍：已掃描且仍持有的寶可夢。
                   {a?.comparedWith.length
                     ? `與 ${a.comparedWith.length} 隻相關個體比較。`
                     : ""}
@@ -1990,7 +2182,7 @@ function PokemonDrawer({
           )}
           {section === "sources" && (
             <div className="sources-view">
-              <p>點選畫面，再回「辨識核對」可對照欄位。時間為原影片時間點。</p>
+              <p>點選截圖可回到「辨識核對」對照欄位。</p>
               <div className="source-grid">
                 {p.sources.map((s, i) => (
                   <button
@@ -2003,11 +2195,11 @@ function PokemonDrawer({
                   >
                     <img
                       src={`/api/frames/${s.frame}`}
-                      alt={`${s.time} 秒來源畫面`}
+                      alt={`${sourceName(s)} ${sourceTime(s)} 來源畫面`}
                       loading="lazy"
                     />
-                    <strong>{s.time.toFixed(2)} 秒</strong>
-                    <small>{s.video}</small>
+                    <strong>{sourceTime(s)}</strong>
+                    <small>{sourceName(s)}</small>
                     <span>{s.fields.length} 個可見欄位</span>
                   </button>
                 ))}
@@ -2041,6 +2233,8 @@ function PokemonDrawer({
                 void onSave({
                   fields: changes,
                   verified,
+                  evolutionSilhouette,
+                  maxStatus,
                   dismissCandidates: dismiss,
                 })
               }

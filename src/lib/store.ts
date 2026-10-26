@@ -32,6 +32,9 @@ export function db() {
       "settings",
       "snapshots",
       "vision_cache",
+      "scans",
+      "scan_items",
+      "transfer_batches",
     ])
       d.exec(
         `CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, data TEXT NOT NULL)`,
@@ -46,7 +49,10 @@ type Table =
   | "pokemon"
   | "settings"
   | "snapshots"
-  | "vision_cache";
+  | "vision_cache"
+  | "scans"
+  | "scan_items"
+  | "transfer_batches";
 export function get<T>(table: Table, key: string): T | null {
   const row = db().prepare(`SELECT data FROM ${table} WHERE id=?`).get(key) as
     { data: string } | undefined;

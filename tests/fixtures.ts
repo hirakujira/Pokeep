@@ -110,6 +110,7 @@ export function record(
     issues: [],
     candidates: [],
     verified: true,
+    maxStatus: "none",
     locked: false,
     owned: true,
     createdAt: "2026-10-24T00:00:00.000Z",

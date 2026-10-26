@@ -7,24 +7,18 @@ import {
   get,
   getSettings,
   getSnapshot,
-  id,
-  listJobs,
   listPokemon,
   now,
   put,
   remove,
   transaction,
-  updateJob,
 } from "@/lib/store";
 import {
   effective,
   fieldsSchema,
   settingsSchema,
-  type Job,
   type Pokemon,
-  type VideoFile,
 } from "@/lib/types";
-import { cancelJob, initializeJobs, newJob, queueJob } from "@/lib/jobs";
 import { reevaluate } from "@/lib/evaluate";
 import { publicSnapshot, updateGameData } from "@/lib/game-data";
 import {
@@ -33,7 +27,24 @@ import {
   importBackup,
   validFrame,
 } from "@/lib/backup";
-import { probeVideo } from "@/lib/video";
+import {
+  activeBatch,
+  activeScan,
+  assertBatchFresh,
+  batches,
+  createScan,
+  discardIncompleteScans,
+  previewBatch,
+  resumeTransferBatch,
+  scanItems,
+  scans,
+  updateScan,
+} from "@/lib/iphone-data";
+import type { TransferBatch } from "@/lib/iphone-types";
+import { transferSignature } from "@/lib/iphone-safety";
+import { resumableTransferIndexes } from "@/lib/iphone-resume";
+import { pokemonSprite } from "@/lib/sprites";
+import { moveName } from "@/lib/move-names";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,30 +89,283 @@ function guard(req: NextRequest, mutation = false) {
   )
     throw new Error("拒絕跨網站寫入請求");
 }
-function syncJobReviews() {
-  for (const j of listJobs().filter((j) => j.status === "review")) {
-    const records = listPokemon().filter(
-      (p) =>
-        p.jobId === j.id ||
-        p.sources.some((s) => s.frame.startsWith(`${j.id}/`)),
-    );
-    if (
-      records.length &&
-      records.every((p) => p.verified && !p.candidates.length)
-    )
-      updateJob(j.id, { status: "completed", stage: "核對完成" });
-  }
-}
 async function handle(req: NextRequest, ctx: Context) {
   const { path: parts } = await ctx.params,
     route = parts.join("/"),
     method = req.method;
   guard(req, method !== "GET");
-  initializeJobs();
+  if (method === "GET" && route === "iphone") {
+    const worker = get<{
+      updatedAt: string;
+      ready: boolean;
+      message: string;
+      version: string | null;
+    }>("settings", "iphone-worker");
+    const selectedScan = activeScan() || scans()[0] || null;
+    return json({
+      worker:
+        worker && Date.now() - Date.parse(worker.updatedAt) < 15000
+          ? worker
+          : null,
+      scan: selectedScan
+        ? {
+            ...selectedScan,
+            review: scanItems(selectedScan.id).filter((item) => {
+              const record = item.pokemonId
+                ? get<Pokemon>("pokemon", item.pokemonId)
+                : null;
+              return item.pokemonId
+                ? !record?.verified || Boolean(record.candidates.length)
+                : false;
+            }).length,
+          }
+        : null,
+      batch: activeBatch() || batches()[0] || null,
+      resumableBatches: batches()
+        .filter((batch) => resumableTransferIndexes(batch).length > 0)
+        .slice(0, 5)
+        .map((batch) => {
+          try {
+            assertBatchFresh(batch);
+            return { ...batch, resumeBlocked: null };
+          } catch (error) {
+            return { ...batch, resumeBlocked: error instanceof Error ? error.message : "資料已變更" };
+          }
+        }),
+    });
+  }
+  if (method === "POST" && route === "iphone/prepare") {
+    put("settings", "iphone-prepare", { requestedAt: now() });
+    return json({ ok: true });
+  }
+  if (method === "GET" && route === "scans") return json(scans());
+  if (method === "POST" && route === "scans/discard")
+    return json(await discardIncompleteScans());
+  if (method === "POST" && route === "scans") {
+    const { scope } = z
+      .object({ scope: z.enum(["results", "all"]) })
+      .parse(await body(req));
+    const worker = get<{ updatedAt: string }>("settings", "iphone-worker");
+    if (!worker || Date.now() - Date.parse(worker.updatedAt) > 15000)
+      throw new Error(
+        "iPhone 背景服務尚未啟動，請用 npm run dev 或 npm start 啟動 Pokekeep",
+      );
+    return json(createScan(scope), 201);
+  }
+  if (parts[0] === "scans" && parts[1]) {
+    const scan = get<import("@/lib/iphone-types").Scan>("scans", parts[1]);
+    if (!scan) return json({ error: "找不到掃描工作" }, 404);
+    if (method === "GET" && parts.length === 2)
+      return json({ ...scan, items: scanItems(scan.id) });
+    if (method === "POST" && parts[2] === "control") {
+      const { action } = z
+        .object({ action: z.enum(["pause", "resume", "stop", "finish"]) })
+        .parse(await body(req));
+      if (action === "finish") {
+        if (
+          scan.status !== "paused" ||
+          scan.phase === "analysis" ||
+          scan.expected !== null ||
+          !scan.scanned ||
+          scanItems(scan.id).length !== scan.scanned
+        )
+          throw new Error("只能在總數未知且截圖檢查點完整時確認截圖結束");
+        if (activeBatch()) throw new Error("放生工作進行中");
+        return json(
+          updateScan(scan.id, {
+            phase: "analysis",
+            status: "queued",
+            stage: "已確認截圖結束，準備解析",
+            checkpointRequired: false,
+            error: null,
+          }),
+        );
+      }
+      if (action === "pause" && ["queued", "running"].includes(scan.status))
+        return json(updateScan(scan.id, { status: "paused", stage: "已暫停" }));
+      if (
+        action === "stop" &&
+        ["queued", "running", "paused"].includes(scan.status)
+      )
+        return json(
+          updateScan(scan.id, { status: "stopped", stage: "已停止" }),
+        );
+      if (action === "resume" && scan.status === "paused") {
+        if (activeBatch()) throw new Error("放生工作進行中");
+        return json(
+          updateScan(scan.id, {
+            status: "queued",
+            stage: "準備續掃",
+            checkpointRequired: false,
+            error: null,
+          }),
+        );
+      }
+      throw new Error("目前狀態不能執行此操作");
+    }
+  }
+  if (method === "GET" && route === "transfers") return json(batches());
+  if (method === "POST" && route === "transfers") {
+    const { scanId } = z.object({ scanId: z.string() }).parse(await body(req));
+    return json(previewBatch(scanId), 201);
+  }
+  if (method === "POST" && route === "transfers/execute-one") {
+    const { pokemonId } = z
+      .object({ pokemonId: z.string() })
+      .parse(await body(req));
+    const approved = transaction(() => {
+      if (activeScan() || activeBatch())
+        throw new Error("手機正在處理其他工作");
+      const scan = scans().find(
+        (row) =>
+          row.status === "completed" &&
+          scanItems(row.id).some((item) => item.pokemonId === pokemonId),
+      );
+      if (!scan)
+        throw new Error("找不到包含這隻寶可夢的已完成掃描");
+      const batch = previewBatch(scan.id);
+      if (
+        !batch.entries.some(
+          (entry) => entry.pokemonId === pokemonId && entry.status === "pending",
+        )
+      )
+        throw new Error("這隻目前不符合放生條件，請重新檢查收藏資料");
+      assertBatchFresh(batch);
+      const next: TransferBatch = {
+        ...batch,
+        status: "approved",
+        selectedPokemonId: pokemonId,
+        approvedAt: now(),
+        updatedAt: now(),
+      };
+      put("transfer_batches", next.id, next);
+      return next;
+    });
+    return json(approved);
+  }
+  if (method === "POST" && route === "transfers/execute-many") {
+    const { pokemonIds } = z
+      .object({ pokemonIds: z.array(z.string()).min(1).max(1000) })
+      .parse(await body(req));
+    if (new Set(pokemonIds).size !== pokemonIds.length)
+      throw new Error("放生名單含有重複個體");
+    const approved = transaction(() => {
+      if (activeScan() || activeBatch())
+        throw new Error("手機正在處理其他工作");
+      const wanted = new Set(pokemonIds);
+      const scan = scans().find((row) => {
+        if (row.status !== "completed") return false;
+        const present = new Set(scanItems(row.id).map((item) => item.pokemonId));
+        return pokemonIds.every((id) => present.has(id));
+      });
+      if (!scan) throw new Error("找不到包含全部勾選個體的已完成掃描");
+      const preview = previewBatch(scan.id);
+      const entries = preview.entries.filter((entry) => wanted.has(entry.pokemonId));
+      if (entries.length !== wanted.size || entries.some((entry) => entry.status !== "pending"))
+        throw new Error("部分勾選個體已不符合放生條件，請重新檢查名單");
+      const next: TransferBatch = {
+        ...preview,
+        mode: "bulk",
+        entries,
+        status: "approved",
+        selectedPokemonId: null,
+        approvedAt: now(),
+        updatedAt: now(),
+      };
+      next.signature = transferSignature(next, listPokemon(), getSnapshot(), getSettings());
+      assertBatchFresh(next);
+      put("transfer_batches", next.id, next);
+      return next;
+    });
+    return json(approved);
+  }
+  if (parts[0] === "transfers" && parts[1]) {
+    const batch = get<TransferBatch>("transfer_batches", parts[1]);
+    if (!batch) return json({ error: "找不到放生批次" }, 404);
+    if (method === "GET" && parts.length === 2) return json(batch);
+    if (method === "POST" && parts[2] === "exclude") {
+      if (batch.status !== "draft")
+        throw new Error("只能從尚未確認的批次排除個體");
+      const { pokemonId } = z
+        .object({ pokemonId: z.string() })
+        .parse(await body(req));
+      if (
+        !batch.entries.some(
+          (entry) => entry.pokemonId === pokemonId && entry.status === "pending",
+        )
+      )
+        throw new Error("只能排除尚未執行的候選個體");
+      const entries = batch.entries.filter(
+        (entry) => entry.pokemonId !== pokemonId,
+      );
+      if (entries.length === batch.entries.length)
+        throw new Error("此個體不在放生名單中");
+      const next = {
+        ...batch,
+        entries,
+        updatedAt: now(),
+        signature: transferSignature(
+          { scanId: batch.scanId, entries },
+          listPokemon(),
+          getSnapshot(),
+          getSettings(),
+        ),
+      };
+      put("transfer_batches", batch.id, next);
+      return json(next);
+    }
+    if (method === "POST" && parts[2] === "execute-one") {
+      const { pokemonId } = z
+        .object({ pokemonId: z.string() })
+        .parse(await body(req));
+      const approved = transaction(() => {
+        const latest = get<TransferBatch>("transfer_batches", batch.id);
+        if (latest?.mode !== "single" || latest.status !== "draft")
+          throw new Error("這份名單目前不能逐隻執行，請重新預覽");
+        if (activeScan() || activeBatch())
+          throw new Error("手機正在處理其他工作");
+        if (
+          !latest.entries.some(
+            (entry) => entry.pokemonId === pokemonId && entry.status === "pending",
+          )
+        )
+          throw new Error("這隻不在尚待執行的放生候選中");
+        assertBatchFresh(latest);
+        const next: TransferBatch = {
+          ...latest,
+          status: "approved",
+          selectedPokemonId: pokemonId,
+          approvedAt: now(),
+          updatedAt: now(),
+          error: null,
+        };
+        put("transfer_batches", batch.id, next);
+        return next;
+      });
+      return json(approved);
+    }
+    if (method === "POST" && parts[2] === "approve") {
+      throw new Error("整批放生已停用；請重新預覽並逐隻確認");
+    }
+    if (method === "POST" && parts[2] === "resume")
+      return json(resumeTransferBatch(batch.id));
+    if (method === "POST" && parts[2] === "stop") {
+      if (!["approved", "running", "paused"].includes(batch.status))
+        throw new Error("此批次無法停止");
+      const stopped = {
+        ...batch,
+        status: "stopped" as const,
+        selectedPokemonId: null,
+        approvedAt: null,
+        updatedAt: now(),
+      };
+      put("transfer_batches", batch.id, stopped);
+      return json(stopped);
+    }
+  }
   if (method === "GET" && route === "state")
     return json({
       pokemon: listPokemon(),
-      jobs: listJobs(),
       settings: getSettings(),
       snapshot: publicSnapshot(),
       apiConfigured: Boolean(process.env.OPENAI_API_KEY),
@@ -112,13 +376,28 @@ async function handle(req: NextRequest, ctx: Context) {
     return json({
       species: Object.values(snapshot?.species || {}).map((s) => ({
         id: s.id,
+        dex: s.dex,
         name: s.name,
         types: s.types,
       })),
       moves: Object.values(snapshot?.moves || {}).map((m) => ({
         id: m.id,
-        name: m.name,
+        name: moveName(m.id, snapshot?.moveNames),
       })),
+    });
+  }
+  if (method === "GET" && parts[0] === "sprites" && parts.length === 2) {
+    const sprite = await pokemonSprite(
+      parts[1],
+      req.nextUrl.searchParams.get("shiny") === "1",
+    );
+    if (!sprite) return json({ error: "找不到像素圖" }, 404);
+    return new Response(new Uint8Array(sprite), {
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+      },
     });
   }
   if (method === "GET" && parts[0] === "frames") {
@@ -152,75 +431,6 @@ async function handle(req: NextRequest, ctx: Context) {
   }
   if (method === "POST" && route === "import")
     return json(await importBackup(await body(req, 150 * 1024 * 1024)));
-  if (method === "POST" && route === "jobs") {
-    const input = z
-      .object({ name: z.string().trim().min(1).max(120) })
-      .parse(await body(req));
-    return json(newJob(input.name), 201);
-  }
-  if (parts[0] === "jobs" && parts[1]) {
-    const jobId = parts[1],
-      job = get<Job>("jobs", jobId);
-    if (!job) return json({ error: "找不到工作" }, 404);
-    if (method === "GET" && parts.length === 2) return json(job);
-    if (method === "PUT" && parts[2] === "files") {
-      if (job.status !== "queued" || job.stage !== "等待上傳")
-        throw new Error("此工作已開始，不能新增影片");
-      if (job.files.length >= 20) throw new Error("每批最多 20 段影片");
-      const name = path
-        .basename(req.nextUrl.searchParams.get("name") || "video.mp4")
-        .slice(0, 200);
-      if (!/\.(mp4|mov)$/i.test(name)) throw new Error("僅支援 MP4／MOV");
-      const fileId = id(),
-        dir = path.join(dataDir, "uploads", jobId),
-        target = path.join(dir, `${fileId}.video`);
-      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-      const file = await fs.open(target, "wx");
-      let size = 0;
-      try {
-        const reader = req.body?.getReader();
-        if (!reader) throw new Error("沒有收到影片");
-        while (true) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          size += chunk.value.byteLength;
-          if (size > 500 * 1024 * 1024) {
-            await reader.cancel();
-            throw new Error("每段影片不可超過 500 MB");
-          }
-          await file.write(chunk.value);
-        }
-        await file.close();
-        const meta = await probeVideo(target, req.signal);
-        const current = get<Job>("jobs", jobId)!;
-        if (current.status !== "queued" || current.stage !== "等待上傳")
-          throw new Error("工作已取消或開始");
-        const video: VideoFile = {
-          id: fileId,
-          name,
-          path: target,
-          size,
-          ...meta,
-        };
-        updateJob(jobId, { files: [...current.files, video] });
-        return json(video, 201);
-      } catch (error) {
-        await file.close().catch(() => {});
-        await fs.rm(target, { force: true });
-        throw error;
-      }
-    }
-    if (method === "POST" && parts[2] === "start") {
-      const input = z
-        .object({ manual: z.boolean().default(false) })
-        .parse(await body(req));
-      return json(queueJob(jobId, input.manual));
-    }
-    if (method === "POST" && parts[2] === "cancel") {
-      await cancelJob(jobId);
-      return json({ ok: true });
-    }
-  }
   if (method === "PATCH" && parts[0] === "pokemon" && parts.length === 2) {
     const record = get<Pokemon>("pokemon", parts[1]);
     if (!record) return json({ error: "找不到個體" }, 404);
@@ -230,6 +440,8 @@ async function handle(req: NextRequest, ctx: Context) {
         verified: z.boolean().optional(),
         locked: z.boolean().optional(),
         owned: z.boolean().optional(),
+        evolutionSilhouette: z.boolean().nullable().optional(),
+        maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
         dismissCandidates: z.boolean().optional(),
       })
       .strict()
@@ -238,8 +450,20 @@ async function handle(req: NextRequest, ctx: Context) {
       ...record,
       overrides: { ...record.overrides, ...input.fields },
       verified: input.verified ?? (input.fields ? false : record.verified),
+      verification:
+        input.verified === true
+          ? ("human" as const)
+          : input.verified === false || input.fields
+            ? null
+            : record.verification,
       locked: input.locked ?? record.locked,
       owned: input.owned ?? record.owned,
+      evolutionSilhouette:
+        input.evolutionSilhouette === undefined
+          ? record.evolutionSilhouette
+          : input.evolutionSilhouette,
+      maxStatus:
+        input.maxStatus === undefined ? record.maxStatus : input.maxStatus,
       updatedAt: now(),
     };
     const merged = effective(next);
@@ -269,7 +493,6 @@ async function handle(req: NextRequest, ctx: Context) {
     }
     put("pokemon", next.id, next);
     reevaluate();
-    syncJobReviews();
     return json(get<Pokemon>("pokemon", next.id));
   }
   if (method === "POST" && route === "merge") {
@@ -289,14 +512,19 @@ async function handle(req: NextRequest, ctx: Context) {
       else if (b.fields[key] !== null && fields[key] !== b.fields[key])
         issues.push(`合併後請核對衝突欄位：${key}`);
     }
+    const maxConflict = a.maxStatus != null && b.maxStatus != null &&
+      a.maxStatus !== b.maxStatus;
+    if (maxConflict) issues.push("合併後請核對極巨化狀態衝突");
     const joined: Pokemon = {
       ...a,
       fields,
       overrides,
+      maxStatus: maxConflict ? null : a.maxStatus ?? b.maxStatus ?? null,
       issues: [...new Set(issues)],
       sources: [...a.sources, ...b.sources],
       locked: a.locked || b.locked,
       verified: false,
+      verification: null,
       candidates: [...new Set([...a.candidates, ...b.candidates])].filter(
         (x) => x !== a.id && x !== b.id,
       ),

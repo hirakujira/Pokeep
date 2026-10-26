@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MaxStatus } from "./max-status";
 
 const numberOrNull = z.number().finite().nonnegative().nullable();
 const textOrNull = z.string().max(160).nullable();
@@ -41,7 +42,7 @@ export const emptyFields = (): Fields =>
   ) as Fields;
 export const fieldLabels: Record<keyof Fields, string> = {
   name: "名稱",
-  speciesId: "物種 ID",
+  speciesId: "全國圖鑑／物種",
   form: "形態",
   cp: "CP",
   hp: "HP",
@@ -76,6 +77,9 @@ export type Evidence = {
   time: number;
   video: string;
   fields: (keyof Fields)[];
+  source?: "video" | "iphone";
+  capturedAt?: string;
+  scanItemId?: string;
 };
 export type Observation = {
   id: string;
@@ -88,6 +92,9 @@ export type Observation = {
   issues: string[];
   ivMeasured: number[] | null;
   kind: string;
+  source?: "video" | "iphone";
+  capturedAt?: string;
+  scanItemId?: string;
 };
 export type Pokemon = {
   id: string;
@@ -98,6 +105,11 @@ export type Pokemon = {
   issues: string[];
   candidates: string[];
   verified: boolean;
+  verification?: "human" | "automatic" | null;
+  /** Evolve-button silhouette observed in an iPhone moves screenshot. */
+  evolutionSilhouette?: boolean | null;
+  /** Badge on the iPhone detail page; null means that it was not readable. */
+  maxStatus?: MaxStatus | null;
   locked: boolean;
   owned: boolean;
   createdAt: string;
@@ -138,7 +150,7 @@ export type RaidResult = {
   condition: string | null;
 };
 export type Analysis = {
-  category: "transfer" | "collect" | "invest" | "review";
+  category: "transfer" | "collect" | "invest" | "evolve" | "review";
   reasons: string[];
   warnings: string[];
   collectionKeys: string[];
@@ -180,6 +192,8 @@ export type Species = {
   id: string;
   dex: number;
   name: string;
+  /** True only when every Game Master gender entry for this dex is genderless. */
+  genderless?: boolean;
   types: string[];
   atk: number;
   def: number;
@@ -229,7 +243,7 @@ export type Settings = {
   rareRepresentatives: number;
 };
 export const settingsSchema = z.object({
-  raidSlots: z.number().int().min(1).max(6),
+  raidSlots: z.number().int().min(1).max(24),
   metaCutoff: z.number().int().min(1).max(300),
   ivCutoff: z.number().int().min(1).max(4096),
   rareRepresentatives: z.number().int().min(1).max(10),
@@ -244,6 +258,7 @@ export const categoryLabels = {
   transfer: "可放生",
   collect: "保留收藏",
   invest: "值得培養",
+  evolve: "可進化",
   review: "待確認",
 };
 export const effective = (p: Pokemon): Fields => ({

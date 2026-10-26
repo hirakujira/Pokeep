@@ -55,6 +55,7 @@ export function mergeObservation(p: Pokemon, o: Observation): Pokemon {
     fields,
     issues: [...new Set(issues)],
     verified: issues.length ? false : p.verified,
+    verification: issues.length ? null : p.verification,
     sources: [
       ...p.sources,
       {
@@ -65,6 +66,9 @@ export function mergeObservation(p: Pokemon, o: Observation): Pokemon {
         fields: (Object.keys(o.fields) as (keyof Fields)[]).filter(
           (k) => o.fields[k] !== null,
         ),
+        source: o.source || "video",
+        capturedAt: o.capturedAt,
+        scanItemId: o.scanItemId,
       },
     ],
     updatedAt: now(),
@@ -129,6 +133,7 @@ export function integrateObservations(
         issues: o.issues,
         candidates: possible.map((x) => x.id),
         verified: false,
+        verification: null,
         locked: false,
         owned: true,
         createdAt: now(),

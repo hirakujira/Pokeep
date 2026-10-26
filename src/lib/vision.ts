@@ -5,8 +5,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { dataDir, get, put } from "./store";
-import { fieldsSchema, emptyFields, type Fields, type Snapshot } from "./types";
+import { fieldsSchema, type Fields, type Snapshot } from "./types";
 import { resolveSpecies } from "./game-data";
+import { openAiBaseURL, openAiClient } from "./openai-config";
 
 const schema = z.object({
   kind: z.enum(["appraisal", "details", "transition", "other"]),
@@ -15,8 +16,8 @@ const schema = z.object({
   clear: z.boolean(),
 });
 export type VisionResult = z.infer<typeof schema>;
-const promptVersion = "pogo-iphone-zh-v3";
-const instructions = `你是繁體中文 Pokémon GO 螢幕錄影資料擷取器，只讀畫面，不給培養建議。畫面是裁切掉狀態列及地點的 iPhone 截圖。輸出 schema 全部欄位，未看見或不確定一律 null，不得猜測。
+const promptVersion = "pogo-iphone-zh-v4";
+const instructions = `你是繁體中文 Pokémon GO iPhone 畫面資料擷取器，只讀畫面，不給培養建議。畫面是裁切掉狀態列及地點的 iPhone 截圖。輸出 schema 全部欄位，未看見或不確定一律 null，不得猜測。
 name 使用原始畫面名稱。speciesId 若確定則使用 PvPoke 英文 ID（例如 grimer_alolan_shadow）；不確定 null。form 使用 normal / alolan / galarian / hisuian / paldean 或明確英文形態，不要把性別當形態。注意阿羅拉臭泥是毒/惡，普通臭泥是毒。名稱可能是暱稱，不等於物種。
 ivAtk/ivDef/ivSta 只能讀隊長評價三條刻度（0到15），沒有評價條不能從星數、CP 或物種推測。hp 是最大 HP（例如 30/72 讀72）。shadow/purified/shiny/favorite 必須見到可辨識的圖示或特徵，否則 null；若完整外觀清楚足以排除某特徵可 false。costume 沒有服裝時 null；不要將地方形態當成服裝。
 fastMove/chargeMove/chargeMove2 保留畫面中文招式，未顯示 null。糖果、XL、星塵只讀數字。powerUpDust/Candy 是強化按鈕旁單次成本，evolutionCandy 是進化按鈕成本，secondMoveDust/Candy 是新攻擊招式成本。強化確認視窗中的新 CP 不得當目前 CP，視窗遮擋則 issues 說明並標 transition。不要將招式威力、捕獲日期、星數或身高體重的 XL 標記混入數字欄位。height 公尺 weight 公斤。
@@ -31,6 +32,7 @@ export async function recognize(
     model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
   const hash = createHash("sha256")
     .update(promptVersion)
+    .update(openAiBaseURL() || "https://api.openai.com/v1")
     .update(model)
     .update(snapshot?.version || "none")
     .update(image)
@@ -42,10 +44,9 @@ export async function recognize(
   }
   if (!process.env.OPENAI_API_KEY)
     throw new Error(
-      "尚未設定 OPENAI_API_KEY。請在 .env.local 設定後重啟，或先使用人工核對模式。",
+      "尚未設定 OPENAI_API_KEY。請在 .env.local 設定後重啟，才能開始 iPhone 自動掃描。",
     );
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const client = openAiClient({
     maxRetries: 0,
     timeout: 90000,
   });
@@ -152,17 +153,4 @@ export function reconcileIV(
       if (result[key] === null) result[key] = measured[i];
     }
   return { fields: result, issues };
-}
-export function manualObservation(measured: number[] | null): VisionResult {
-  return {
-    kind: measured ? "appraisal" : "details",
-    fields: {
-      ...emptyFields(),
-      ...(measured
-        ? { ivAtk: measured[0], ivDef: measured[1], ivSta: measured[2] }
-        : {}),
-    },
-    issues: ["人工核對模式：請依來源畫面填寫欄位，尚未呼叫 AI"],
-    clear: false,
-  };
 }
