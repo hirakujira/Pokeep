@@ -6,6 +6,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import sharp from "sharp";
 import { z } from "zod";
 import { openAiBaseURL, openAiClient } from "./openai-config";
+import { getRuntimeConfig } from "./runtime-config";
 import { spriteSlug } from "./sprites";
 import { dataDir, get, put } from "./store";
 import type { Species } from "./types";
@@ -231,7 +232,7 @@ export async function reviewShiny(
   ]);
   if (!top || !appraisal) return null;
   const images: [Buffer, Buffer] = [top, appraisal];
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = getRuntimeConfig().model;
   const first = await judge(model, images, references, false, signal, onUsage);
   if (first.verdict === "uncertain")
     return { verdict: "uncertain" as const, model, reason: first.reason };

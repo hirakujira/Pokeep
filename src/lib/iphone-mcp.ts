@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { getRuntimeConfig } from "./runtime-config";
 
 type Result = {
   content?: { type: string; text?: string }[];
@@ -14,11 +15,10 @@ type Pending = {
 };
 
 export function iphoneUseEntrypoint() {
-  const root =
-    process.env.IPHONE_USE_ROOT || "/Users/Hiraku/Develop/utils/iPhone-use";
+  const root = getRuntimeConfig().iphoneUseRoot;
   const file = path.join(root, "server", "iphone_use.py");
   if (!fs.existsSync(file))
-    throw new Error(`找不到 iPhone Use：${file}。請設定 IPHONE_USE_ROOT。`);
+    throw new Error(`找不到 iPhone Use：${file}。請到網頁「設定」頁指定位置。`);
   return { root, file };
 }
 
@@ -37,7 +37,7 @@ export class IphoneMcp {
   async connect() {
     if (this.child) return;
     const { root, file } = iphoneUseEntrypoint();
-    const child = spawn(process.env.IPHONE_USE_PYTHON || "python3", [file], {
+    const child = spawn(getRuntimeConfig().iphoneUsePython, [file], {
       cwd: root,
       env: { ...process.env, IPHONE_USE_ANALYTICS: "0" },
       stdio: ["pipe", "pipe", "pipe"],

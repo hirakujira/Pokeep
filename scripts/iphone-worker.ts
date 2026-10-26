@@ -9,6 +9,7 @@ import type { TransferBatch } from "../src/lib/iphone-types";
 import { reevaluate } from "../src/lib/evaluate";
 import { setPhoneUsageRecorder } from "../src/lib/iphone-vision";
 import { recoverInterruptedPhoneWork } from "../src/lib/iphone-recovery";
+import { getRuntimeConfig } from "../src/lib/runtime-config";
 
 const lockPath = path.join(dataDir, "iphone-worker.lock");
 fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -39,6 +40,10 @@ recoverInterruptedPhoneWork();
 reevaluate();
 
 const phone = new IphoneMcp();
+let phoneConfig = JSON.stringify({
+  root: getRuntimeConfig().iphoneUseRoot,
+  python: getRuntimeConfig().iphoneUsePython,
+});
 let ready = false;
 let message = "等待連接 iPhone";
 let activeOperationId: string | null = null;
@@ -48,7 +53,7 @@ const heartbeat = setInterval(() => {
     try {
       version = iphoneUseVersion();
     } catch {
-      message = "找不到 iPhone Use，請設定 IPHONE_USE_ROOT";
+      message = "找不到 iPhone Use，請到網頁「設定」頁指定位置";
     }
     put("settings", "iphone-worker", {
       updatedAt: now(),
@@ -70,6 +75,16 @@ const heartbeat = setInterval(() => {
 }, 2000);
 
 async function tick() {
+  const nextPhoneConfig = JSON.stringify({
+    root: getRuntimeConfig().iphoneUseRoot,
+    python: getRuntimeConfig().iphoneUsePython,
+  });
+  if (nextPhoneConfig !== phoneConfig && !activeScan() && !activeBatch()) {
+    phone.close();
+    phoneConfig = nextPhoneConfig;
+    ready = false;
+    message = "iPhone Use 設定已更新，請重新準備連線";
+  }
   const prepare = get<{ requestedAt: string }>("settings", "iphone-prepare");
   if (prepare) {
     put("settings", "iphone-prepare", null);

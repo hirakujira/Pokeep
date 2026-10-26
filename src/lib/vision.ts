@@ -8,6 +8,7 @@ import { dataDir, get, put } from "./store";
 import { fieldsSchema, type Fields, type Snapshot } from "./types";
 import { resolveSpecies } from "./game-data";
 import { openAiBaseURL, openAiClient } from "./openai-config";
+import { getRuntimeConfig } from "./runtime-config";
 
 const schema = z.object({
   kind: z.enum(["appraisal", "details", "transition", "other"]),
@@ -29,7 +30,7 @@ export async function recognize(
   onUsage: (usage: { input: number; output: number; cached: boolean }) => void,
 ): Promise<VisionResult> {
   const image = await fs.readFile(path.join(dataDir, "frames", frame)),
-    model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    model = getRuntimeConfig().model;
   const hash = createHash("sha256")
     .update(promptVersion)
     .update(openAiBaseURL() || "https://api.openai.com/v1")
@@ -42,9 +43,9 @@ export async function recognize(
     onUsage({ input: 0, output: 0, cached: true });
     return cached;
   }
-  if (!process.env.OPENAI_API_KEY)
+  if (!getRuntimeConfig().apiKey)
     throw new Error(
-      "尚未設定 OPENAI_API_KEY。請在 .env.local 設定後重啟，才能開始 iPhone 自動掃描。",
+      "尚未設定 API key。請到網頁的「設定」頁填入，才能開始 iPhone 自動掃描。",
     );
   const client = openAiClient({
     maxRetries: 0,

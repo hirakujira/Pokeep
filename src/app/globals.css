@@ -1264,6 +1264,23 @@ td:last-child > svg {
   font-family: var(--mono);
   text-align: right;
 }
+.settings-card .preference-fields label:not(.settings-check) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.settings-card .preference-fields label:not(.settings-check) input {
+  width: 100%;
+  text-align: left;
+}
+.settings-card .preference-fields .settings-check {
+  justify-content: flex-start;
+}
+.settings-card .preference-fields .settings-check input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
 .storage-summary {
   display: flex;
   align-items: baseline;

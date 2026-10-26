@@ -41,6 +41,7 @@ import {
   type Cost,
 } from "@/lib/types";
 import type { Scan, TransferBatch } from "@/lib/iphone-types";
+import type { PublicRuntimeConfig } from "@/lib/runtime-config";
 import { resumableTransferIndexes } from "@/lib/iphone-resume";
 import { localizeMoveText, moveName } from "@/lib/move-names";
 import { typeName } from "@/lib/type-names";
@@ -59,6 +60,7 @@ type State = {
   snapshot: SnapshotInfo | null;
   apiConfigured: boolean;
   model: string;
+  runtime: PublicRuntimeConfig;
 };
 type Catalog = {
   species: { id: string; dex: number; name: string; types: string[] }[];
@@ -82,6 +84,15 @@ const empty: State = {
   snapshot: null,
   apiConfigured: false,
   model: "gpt-4.1-mini",
+  runtime: {
+    apiConfigured: false,
+    model: "gpt-4.1-mini",
+    baseUrl: "",
+    analysisConcurrency: 6,
+    shinyReviewConcurrency: 6,
+    iphoneUseRoot: "/Users/Hiraku/Develop/utils/iPhone-use",
+    iphoneUsePython: "python3",
+  },
 };
 const tabs = [
   { id: "iphone" as Tab, label: "iPhone 掃描", icon: Smartphone },
@@ -641,7 +652,7 @@ export default function Dashboard() {
                 </button>
                 {!state.apiConfigured && (
                   <p className="job-error">
-                    請先在 .env.local 設定 OPENAI_API_KEY。
+                    請先到「設定」頁填入 API key。
                   </p>
                 )}
               </section>
@@ -1326,6 +1337,11 @@ function SettingsView({
   busy: string;
 }) {
   const [preferences, setPreferences] = useState(state.settings);
+  const [runtime, setRuntime] = useState(state.runtime);
+  const [apiKey, setApiKey] = useState("");
+  const [clearApiKey, setClearApiKey] = useState(false);
+  const [showClearPokemon, setShowClearPokemon] = useState(false);
+  const [clearConfirmation, setClearConfirmation] = useState("");
   useEffect(
     () => setPreferences(state.settings),
     [
@@ -1335,6 +1351,15 @@ function SettingsView({
       state.settings.rareRepresentatives,
     ],
   );
+  useEffect(() => setRuntime(state.runtime), [
+    state.runtime.apiConfigured,
+    state.runtime.model,
+    state.runtime.baseUrl,
+    state.runtime.analysisConcurrency,
+    state.runtime.shinyReviewConcurrency,
+    state.runtime.iphoneUseRoot,
+    state.runtime.iphoneUsePython,
+  ]);
   return (
     <div className="settings-grid">
       <section className="panel settings-card">
@@ -1346,16 +1371,42 @@ function SettingsView({
           {state.apiConfigured ? "API key 已設定" : "尚未設定 API key"}
           <small>{state.model}</small>
         </div>
-        <ol className="setup-list">
-          <li>
-            在專案根目錄建立 <code>.env.local</code>
-          </li>
-          <li>填入 key 與模型：</li>
-        </ol>
-        <pre>OPENAI_API_KEY=你的_API_key{"\n"}OPENAI_MODEL=gpt-4.1-mini{"\n"}# 使用相容伺服器時設定：{"\n"}# OPENAI_BASE_URL=http://127.0.0.1:1234/v1</pre>
-        <p className="caption">
-          儲存後重新啟動 <code>npm run dev</code>。API 依用量計費。
-        </p>
+        <div className="preference-fields">
+          <label>
+            <span>API key（留空保留已設定的 key）</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={apiKey}
+              placeholder={state.apiConfigured ? "已設定" : "輸入 API key"}
+              onChange={(event) => setApiKey(event.target.value)}
+              disabled={clearApiKey}
+            />
+          </label>
+          {state.apiConfigured && (
+            <label className="settings-check">
+              <input type="checkbox" checked={clearApiKey} onChange={(event) => setClearApiKey(event.target.checked)} />
+              <span>清除已儲存的 API key</span>
+            </label>
+          )}
+          <label>
+            <span>模型</span>
+            <input value={runtime.model} onChange={(event) => setRuntime((value) => ({ ...value, model: event.target.value }))} />
+          </label>
+          <label>
+            <span>AI 伺服器網址（留空使用 OpenAI）</span>
+            <input type="url" value={runtime.baseUrl} placeholder="http://127.0.0.1:1234/v1" onChange={(event) => setRuntime((value) => ({ ...value, baseUrl: event.target.value }))} />
+          </label>
+          <label>
+            <span>一般解析並行數（1–8）</span>
+            <input type="number" min={1} max={8} value={runtime.analysisConcurrency} onChange={(event) => setRuntime((value) => ({ ...value, analysisConcurrency: Number(event.target.value) }))} />
+          </label>
+          <label>
+            <span>色違複核並行數（1–8）</span>
+            <input type="number" min={1} max={8} value={runtime.shinyReviewConcurrency} onChange={(event) => setRuntime((value) => ({ ...value, shinyReviewConcurrency: Number(event.target.value) }))} />
+          </label>
+        </div>
+        <p className="caption">設定儲存在這台 Mac，不會放進匯出的備份。API 依用量計費。</p>
         <a
           className="text-link"
           href="https://platform.openai.com/api-keys"
@@ -1365,6 +1416,34 @@ function SettingsView({
           管理 OpenAI API keys
           <ArrowUpRight size={14} />
         </a>
+        <h3>iPhone Use</h3>
+        <div className="preference-fields">
+          <label>
+            <span>專案位置</span>
+            <input value={runtime.iphoneUseRoot} onChange={(event) => setRuntime((value) => ({ ...value, iphoneUseRoot: event.target.value }))} />
+          </label>
+          <label>
+            <span>Python 指令或執行檔</span>
+            <input value={runtime.iphoneUsePython} onChange={(event) => setRuntime((value) => ({ ...value, iphoneUsePython: event.target.value }))} />
+          </label>
+        </div>
+        <button className="button primary" disabled={!!busy} onClick={() => void onAction("runtime-settings", async () => {
+          await api("runtime-settings", "PATCH", {
+            model: runtime.model,
+            baseUrl: runtime.baseUrl,
+            analysisConcurrency: runtime.analysisConcurrency,
+            shinyReviewConcurrency: runtime.shinyReviewConcurrency,
+            iphoneUseRoot: runtime.iphoneUseRoot,
+            iphoneUsePython: runtime.iphoneUsePython,
+            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+            ...(clearApiKey ? { clearApiKey: true } : {}),
+          });
+          setApiKey("");
+          setClearApiKey(false);
+          onToast("連線與解析設定已儲存");
+        })}>
+          <Check size={15} />儲存連線與解析設定
+        </button>
       </section>
       <section className="panel settings-card">
         <h2>遊戲資料</h2>
@@ -1525,6 +1604,36 @@ function SettingsView({
           }}
         />
         <p className="caption">匯入時不會覆蓋既有紀錄與人工修正。</p>
+      </section>
+      <section className="panel settings-card">
+        <h2>清除寶可夢資料</h2>
+        <p>清除全部寶可夢、掃描截圖、辨識快取及放生紀錄。連線設定、清倉規則和遊戲資料會保留。此操作無法復原，建議先匯出備份。</p>
+        {!showClearPokemon ? (
+          <button className="button danger-outline" disabled={!!busy} onClick={() => setShowClearPokemon(true)}>
+            <Trash2 size={15} />清除所有寶可夢資料
+          </button>
+        ) : (
+          <div className="preference-fields">
+            <label>
+              <span>輸入「清除全部寶可夢」以確認</span>
+              <input value={clearConfirmation} autoComplete="off" onChange={(event) => setClearConfirmation(event.target.value)} />
+            </label>
+            <div className="button-row">
+              <button className="button secondary" disabled={!!busy} onClick={() => {
+                setShowClearPokemon(false);
+                setClearConfirmation("");
+              }}>取消</button>
+              <button className="button danger" disabled={!!busy || clearConfirmation !== "清除全部寶可夢"} onClick={() => void onAction("clear-pokemon", async () => {
+                const result = await api<{ removedPokemon: number }>("pokemon/clear-all", "POST", { confirmation: clearConfirmation });
+                setShowClearPokemon(false);
+                setClearConfirmation("");
+                onToast(`已清除 ${result.removedPokemon} 筆寶可夢資料`);
+              })}>
+                <Trash2 size={15} />確認清除
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

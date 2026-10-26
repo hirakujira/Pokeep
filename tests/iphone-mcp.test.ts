@@ -1,8 +1,11 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+const data = fs.mkdtempSync(path.join(os.tmpdir(), "pokekeep-mcp-data-"));
+(globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = data;
+const store = await import("../src/lib/store");
 
 test("MCP stdio 只執行一次呼叫並保留不確定錯誤", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pokekeep-pua-mock-"));
@@ -20,7 +23,8 @@ for line in sys.stdin:
         result={'content':[{'type':'text','text':json.dumps(data)}],'isError':'error' in data}
     print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
 `);
-  process.env.IPHONE_USE_ROOT = root;
+  const { saveRuntimeConfig } = await import("../src/lib/runtime-config");
+  saveRuntimeConfig({ iphoneUseRoot: root });
   const { IphoneMcp } = await import("../src/lib/iphone-mcp");
   const phone = new IphoneMcp();
   try {
@@ -33,7 +37,11 @@ for line in sys.stdin:
     );
   } finally {
     phone.close();
-    delete process.env.IPHONE_USE_ROOT;
+    store.remove("settings", "runtime-config");
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+after(() => {
+  store.db().close();
+  fs.rmSync(data, { recursive: true, force: true });
 });

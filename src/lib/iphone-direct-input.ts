@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { iphoneUseEntrypoint } from "./iphone-mcp";
+import { getRuntimeConfig } from "./runtime-config";
 
 /** Unicode search entry for Pokémon GO's custom field, serialized with iPhone Use. */
 export function injectSearchText(query: string): Promise<void> {
@@ -10,11 +11,10 @@ export function injectSearchText(query: string): Promise<void> {
   const root = iphoneUseEntrypoint().root;
   return new Promise((resolve, reject) => {
     const child = spawn(
-      process.env.IPHONE_USE_PYTHON || "python3",
-      [path.join(process.cwd(), "scripts", "iphone-type-search.py")],
+      getRuntimeConfig().iphoneUsePython,
+      [path.join(process.cwd(), "scripts", "iphone-type-search.py"), root],
       {
         cwd: process.cwd(),
-        env: { ...process.env, IPHONE_USE_ROOT: root },
         stdio: ["pipe", "pipe", "pipe"],
       },
     );

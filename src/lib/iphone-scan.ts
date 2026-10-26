@@ -1,6 +1,7 @@
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { IphoneMcp, iphoneUseVersion } from "./iphone-mcp";
+import { getRuntimeConfig } from "./runtime-config";
 import {
   inspectPhoneImage,
   phoneVisionBottom,
@@ -881,7 +882,7 @@ async function recheckFavoriteRecords(scanId: string) {
         // Keep this individual pending if its saved evidence cannot be rechecked.
       }
     },
-    concurrency: Number.parseInt(process.env.POGO_ANALYSIS_CONCURRENCY || "6", 10),
+    concurrency: getRuntimeConfig().analysisConcurrency,
   });
   if (!rechecked) return false;
   const review = scanItems(scanId).filter((item) => {
@@ -964,7 +965,7 @@ export async function reviewUnknownShiny(
       const latest = get<ScanItem>("scan_items", item.id);
       if (latest) put("scan_items", item.id, { ...latest, shinyReview: proof });
     },
-    concurrency: Number.parseInt(process.env.POGO_SHINY_REVIEW_CONCURRENCY || "6", 10),
+    concurrency: getRuntimeConfig().shinyReviewConcurrency,
   });
   const review = scanItems(scanId).filter((item) => {
     const record = item.pokemonId ? get<Pokemon>("pokemon", item.pokemonId) : null;
@@ -993,7 +994,7 @@ export async function analyzeScan(scanId: string) {
     active: () => get<Scan>("scans", scanId)?.status === "running",
     prepare: (item, signal) => prepareAnalysis(scanId, item, signal),
     consume: async (item, result) => analyzeOne(scanId, item, Promise.resolve(result)),
-    concurrency: Number.parseInt(process.env.POGO_ANALYSIS_CONCURRENCY || "6", 10),
+    concurrency: getRuntimeConfig().analysisConcurrency,
   });
   reevaluate();
   if (!finished) return;

@@ -8,7 +8,6 @@ shares iPhone Use's operation lock and never accepts a general phone command.
 
 import fcntl
 import json
-import os
 from pathlib import Path
 import re
 import sys
@@ -21,7 +20,7 @@ def main():
     if not match or int(match.group(1)) > 10000:
         raise ValueError("僅允許圖鑑編號或圖鑑編號與背卡搜尋")
 
-    root = Path(os.environ.get("IPHONE_USE_ROOT") or "/Users/Hiraku/Develop/utils/iPhone-use")
+    root = Path(sys.argv[1])
     sys.path.insert(0, str(root / "server"))
     from wda_client import WDAClient
     from wda_setup import state_directory

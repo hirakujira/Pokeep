@@ -45,6 +45,8 @@ import { transferSignature } from "@/lib/iphone-safety";
 import { resumableTransferIndexes } from "@/lib/iphone-resume";
 import { pokemonSprite } from "@/lib/sprites";
 import { moveName } from "@/lib/move-names";
+import { publicRuntimeConfig, saveRuntimeConfig } from "@/lib/runtime-config";
+import { clearPokemonData } from "@/lib/clear-pokemon-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -363,14 +365,28 @@ async function handle(req: NextRequest, ctx: Context) {
       return json(stopped);
     }
   }
-  if (method === "GET" && route === "state")
+  if (method === "GET" && route === "state") {
+    const runtime = publicRuntimeConfig();
     return json({
       pokemon: listPokemon(),
       settings: getSettings(),
       snapshot: publicSnapshot(),
-      apiConfigured: Boolean(process.env.OPENAI_API_KEY),
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      apiConfigured: runtime.apiConfigured,
+      model: runtime.model,
+      runtime,
     });
+  }
+  if (method === "PATCH" && route === "runtime-settings") {
+    if (activeScan() || activeBatch())
+      throw new Error("手機工作執行中，請完成或暫停後再修改連線設定");
+    return json(saveRuntimeConfig(await body(req)));
+  }
+  if (method === "POST" && route === "pokemon/clear-all") {
+    z.object({
+      confirmation: z.literal("清除全部寶可夢"),
+    }).strict().parse(await body(req));
+    return json(clearPokemonData());
+  }
   if (method === "GET" && route === "species") {
     const snapshot = getSnapshot();
     return json({

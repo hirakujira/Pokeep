@@ -12,7 +12,7 @@ import {
 } from "./types";
 
 export const dataDir = path.resolve(
-  /* turbopackIgnore: true */ process.env.POGO_DATA_DIR ||
+  /* turbopackIgnore: true */ (globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ ||
     path.join(process.cwd(), ".data"),
 );
 export const id = () => randomUUID();
@@ -21,7 +21,9 @@ const globalDb = globalThis as unknown as { pogoDb?: DatabaseSync };
 export function db() {
   if (!globalDb.pogoDb) {
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dataDir, 0o700);
     const d = new DatabaseSync(path.join(dataDir, "collection.sqlite"));
+    fs.chmodSync(path.join(dataDir, "collection.sqlite"), 0o600);
     d.exec(
       "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
     );

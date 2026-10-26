@@ -3,6 +3,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import sharp from "sharp";
 import { openAiClient } from "./openai-config";
+import { getRuntimeConfig } from "./runtime-config";
 
 const pageSchema = z.object({
   page: z.enum([
@@ -78,8 +79,8 @@ export async function inspectPhoneImage(
   target: Target | null,
   redactLocation = false,
 ): Promise<PhonePage> {
-  if (!process.env.OPENAI_API_KEY)
-    throw new Error("自動掃描需要 OPENAI_API_KEY");
+  if (!getRuntimeConfig().apiKey)
+    throw new Error("自動掃描需要先到網頁「設定」頁填入 API key");
   const meta = await sharp(file).metadata();
   if (!meta.width || !meta.height || meta.width >= meta.height)
     throw new Error("僅支援直式 iPhone 畫面");
@@ -115,7 +116,7 @@ export async function inspectPhoneImage(
     timeout: 90000,
   });
   const response = await client.responses.parse({
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    model: getRuntimeConfig().model,
     store: false,
     input: [
       { role: "system", content: guide },

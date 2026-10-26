@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { fixture, species } from "./fixtures";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pokekeep-sprites-test-"));
-process.env.POGO_DATA_DIR = temp;
+(globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
 const store = await import("../src/lib/store");
 const { pokemonSprite, spriteSlug } = await import("../src/lib/sprites");
 after(() => {

@@ -9,7 +9,7 @@ import type { Scan, ScanItem, TransferBatch } from "../src/lib/iphone-types";
 import type { IphoneMcp } from "../src/lib/iphone-mcp";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pokekeep-iphone-test-"));
-process.env.POGO_DATA_DIR = temp;
+(globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
 const store = await import("../src/lib/store");
 const safety = await import("../src/lib/iphone-safety");
 const { evaluateCollection, combatPower, hitPoints } = await import("../src/lib/evaluate");

@@ -1,21 +1,6 @@
 import { spawn } from "node:child_process";
 
 const mode = process.argv[2] === "start" ? "start" : "dev";
-const envMode = mode === "start" ? "production" : "development";
-// Load the same local file precedence as Next before starting the worker.
-// process.loadEnvFile keeps values already provided by the shell or an earlier file.
-for (const file of [
-  `.env.${envMode}.local`,
-  ".env.local",
-  `.env.${envMode}`,
-  ".env",
-]) {
-  try {
-    process.loadEnvFile(file);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-}
 const children = [
   spawn(process.execPath, ["--import", "tsx", "scripts/iphone-worker.ts"], {
     stdio: "inherit",

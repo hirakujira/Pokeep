@@ -8,7 +8,7 @@ import { fixture, record, species, settings } from "./fixtures";
 import { emptyFields, settingsSchema, type Observation } from "../src/lib/types";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pogo-test-"));
-process.env.POGO_DATA_DIR = temp;
+(globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
 const {
   combatPower,
   hitPoints,
@@ -632,19 +632,19 @@ test("沒有 API key 時不假裝已辨識", async () => {
       .jpeg()
       .toBuffer(),
   );
-  delete process.env.OPENAI_API_KEY;
+  store.remove("settings", "runtime-config");
   await assert.rejects(
     () =>
       recognize("test/one.jpg", null, new AbortController().signal, () => {}),
-    /OPENAI_API_KEY/,
+    /API key/,
   );
 });
 test("Responses API 結構化辨識會重試429、記錄用量並快取相同畫面", async () => {
-  const original = globalThis.fetch,
-    originalKey = process.env.OPENAI_API_KEY,
-    originalBaseURL = process.env.OPENAI_BASE_URL;
-  process.env.OPENAI_API_KEY = "test-not-a-real-key";
-  process.env.OPENAI_BASE_URL = "http://127.0.0.1:1234/v1";
+  const original = globalThis.fetch;
+  store.put("settings", "runtime-config", {
+    apiKey: "test-not-a-real-key",
+    baseUrl: "http://127.0.0.1:1234/v1",
+  });
   let calls = 0;
   const urls: string[] = [];
   const parsed = {
@@ -710,7 +710,10 @@ test("Responses API 結構化辨識會重試429、記錄用量並快取相同畫
     assert.equal(calls, 2);
     assert.ok(urls.every((url) => url === "http://127.0.0.1:1234/v1/responses"));
     assert.deepEqual(usage[1], { input: 0, output: 0, cached: true });
-    process.env.OPENAI_BASE_URL = "http://127.0.0.1:5678/v1";
+    store.put("settings", "runtime-config", {
+      apiKey: "test-not-a-real-key",
+      baseUrl: "http://127.0.0.1:5678/v1",
+    });
     await recognize(
       "test/one.jpg",
       fixture(),
@@ -721,15 +724,12 @@ test("Responses API 結構化辨識會重試429、記錄用量並快取相同畫
     assert.equal(urls[2], "http://127.0.0.1:5678/v1/responses");
   } finally {
     globalThis.fetch = original;
-    if (originalKey) process.env.OPENAI_API_KEY = originalKey;
-    else delete process.env.OPENAI_API_KEY;
-    if (originalBaseURL) process.env.OPENAI_BASE_URL = originalBaseURL;
-    else delete process.env.OPENAI_BASE_URL;
+    store.remove("settings", "runtime-config");
   }
 });
 test("AI 等候重試時可以取消，不繼續產生請求", async () => {
   const original = globalThis.fetch;
-  process.env.OPENAI_API_KEY = "test-not-a-real-key";
+  store.put("settings", "runtime-config", { apiKey: "test-not-a-real-key" });
   const control = new AbortController();
   let calls = 0;
   globalThis.fetch = async () => {
@@ -748,7 +748,7 @@ test("AI 等候重試時可以取消，不繼續產生請求", async () => {
     assert.equal(calls, 1);
   } finally {
     globalThis.fetch = original;
-    delete process.env.OPENAI_API_KEY;
+    store.remove("settings", "runtime-config");
   }
 });
 test("完整備份可還原且重複匯入不覆蓋人工修正", async () => {

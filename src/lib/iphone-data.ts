@@ -22,6 +22,7 @@ import {
 } from "./iphone-safety";
 import type { Scan, ScanItem, TransferBatch } from "./iphone-types";
 import { resumableTransferIndexes } from "./iphone-resume";
+import { getRuntimeConfig } from "./runtime-config";
 import type { Pokemon } from "./types";
 
 export const scans = () => all<Scan>("scans").reverse();
@@ -112,8 +113,8 @@ export async function discardIncompleteScans() {
 }
 
 export function createScan(scope: Scan["scope"]) {
-  if (!process.env.OPENAI_API_KEY)
-    throw new Error("自動掃描需要先設定 OPENAI_API_KEY");
+  if (!getRuntimeConfig().apiKey)
+    throw new Error("自動掃描需要先到網頁「設定」頁填入 API key");
   if (activeScan() || activeBatch()) throw new Error("已有手機工作在執行");
   const scan: Scan = {
     id: id(),

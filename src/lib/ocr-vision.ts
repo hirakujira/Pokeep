@@ -7,6 +7,7 @@ import { z } from "zod";
 import { resolveSpecies } from "./game-data";
 import { formatOcrLines, readLocalOcr } from "./local-ocr";
 import { openAiBaseURL, openAiClient } from "./openai-config";
+import { getRuntimeConfig } from "./runtime-config";
 import { dataDir, get, put } from "./store";
 import { emptyFields, fieldsSchema, type Fields, type Snapshot } from "./types";
 import { evolutionSilhouette } from "./evolution-silhouette";
@@ -120,7 +121,7 @@ export async function recognizeScanWithOcr(
     `評價頁 OCR:\n${formatOcrLines(appraisalLines, "appraisal")}`,
   ].join("\n\n");
   const crop = await visualCrop(paths[0]);
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = getRuntimeConfig().model;
   const hash = createHash("sha256")
     .update(promptVersion)
     .update(openAiBaseURL() || "https://api.openai.com/v1")
@@ -132,8 +133,8 @@ export async function recognizeScanWithOcr(
   let parsed = get<Parsed>("vision_cache", hash);
   if (parsed) onUsage({ input: 0, output: 0, cached: true });
   else {
-    if (!process.env.OPENAI_API_KEY)
-      throw new Error("尚未設定 OPENAI_API_KEY，無法校對 OCR 與特殊狀態");
+    if (!getRuntimeConfig().apiKey)
+      throw new Error("尚未在網頁設定 API key，無法校對 OCR 與特殊狀態");
     const client = openAiClient({ maxRetries: 0, timeout: 90000 });
     for (let attempt = 0; attempt < 3; attempt++) {
       signal.throwIfAborted();

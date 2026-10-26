@@ -8,8 +8,7 @@ import { fixture, record } from "./fixtures";
 import type { Pokemon } from "../src/lib/types";
 import type { TransferBatch } from "../src/lib/iphone-types";
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pogo-api-test-"));
-process.env.POGO_DATA_DIR = temp;
-delete process.env.OPENAI_API_KEY;
+(globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
 const route = await import("../src/app/api/[...path]/route");
 const store = await import("../src/lib/store");
 after(() => {
@@ -75,7 +74,7 @@ test("正式Next服務內部hostname與瀏覽器不同時，同源寫入仍可�
   assert.equal(response.status, 200);
 });
 test("手機 API 只建立持久化掃描工作，暫停與停止不操作裝置", async () => {
-  process.env.OPENAI_API_KEY = "test-only-key";
+  store.put("settings", "runtime-config", { apiKey: "test-only-key" });
   store.put("settings", "iphone-worker", {
     updatedAt: new Date().toISOString(),
     ready: false,
@@ -110,7 +109,7 @@ test("手機 API 只建立持久化掃描工作，暫停與停止不操作裝置
     "stopped",
   );
   assert.equal((await request("iphone")).status, 200);
-  delete process.env.OPENAI_API_KEY;
+  store.remove("settings", "runtime-config");
 });
 
 test("逐隻放生每次只授權一個候選，重複請求與整批執行被拒絕", async () => {
@@ -525,12 +524,29 @@ test("重來會清除未完成掃描及其個體和截圖，保留其他收藏",
   assert.deepEqual(store.get<Pokemon>("pokemon", "keep-peer")?.candidates, []);
 });
 test("狀態介面只回傳 API 是否設定，不暴露 key", async () => {
-  process.env.OPENAI_API_KEY = "synthetic-never-a-real-secret";
+  process.env.OPENAI_API_KEY = "ignored-environment-key";
+  assert.equal((await (await request("state")).json()).apiConfigured, false);
+  assert.equal((await request("runtime-settings", "PATCH", { apiKey: "synthetic-never-a-real-secret" })).status, 200);
   const response = await request("state"),
     text = await response.text();
   assert.ok(text.includes('"apiConfigured":true'));
   assert.ok(!text.includes("synthetic-never-a-real-secret"));
+  const changed = await request("runtime-settings", "PATCH", {
+    model: "local-model",
+    baseUrl: "http://127.0.0.1:1234/v1",
+    analysisConcurrency: 8,
+  });
+  assert.equal(changed.status, 200);
+  assert.ok(!(await changed.text()).includes("synthetic-never-a-real-secret"));
+  assert.equal((await (await request("state")).json()).runtime.model, "local-model");
+  assert.equal((await (await request("state")).json()).runtime.apiConfigured, true);
+  assert.equal((await request("runtime-settings", "PATCH", { baseUrl: "file:///tmp/secret" })).status, 400);
+  const { exportBackup } = await import("../src/lib/backup");
+  assert.ok(!JSON.stringify(await exportBackup()).includes("synthetic-never-a-real-secret"));
+  assert.equal((await request("runtime-settings", "PATCH", { clearApiKey: true })).status, 200);
+  assert.equal((await (await request("state")).json()).apiConfigured, false);
   delete process.env.OPENAI_API_KEY;
+  store.remove("settings", "runtime-config");
 });
 test("錄影建立與上傳介面已停用", async () => {
   assert.equal((await request("jobs", "POST", { name: "舊入口" })).status, 404);
@@ -599,4 +615,34 @@ test("無效IV、暗影與淨化矛盾、錯誤備份都被拒絕", async () => 
     (await request("import", "POST", { format: "wrong" })).status,
     400,
   );
+});
+test("清除全部寶可夢需明確確認，保留連線設定與遊戲資料", async () => {
+  const scan = {
+    id: "clear-test-scan",
+    status: "queued",
+    updatedAt: new Date().toISOString(),
+  };
+  store.put("scans", scan.id, scan);
+  assert.equal((await request("pokemon/clear-all", "POST", { confirmation: "清除全部寶可夢" })).status, 400);
+  store.remove("scans", scan.id);
+  assert.equal((await request("pokemon/clear-all", "POST", { confirmation: "確認" })).status, 400);
+  store.put("settings", "iphone-operation", { updatedAt: new Date().toISOString() });
+  assert.equal((await request("pokemon/clear-all", "POST", { confirmation: "清除全部寶可夢" })).status, 400);
+  store.remove("settings", "iphone-operation");
+
+  store.put("settings", "runtime-config", { apiKey: "test-only-secret", model: "test-model" });
+  store.put("pokemon", "to-clear", record("to-clear"));
+  store.put("transfer_batches", "clear-history", { id: "clear-history", status: "completed", entries: [] });
+  const frame = path.join(temp, "frames", "clear-test", "one.jpg");
+  fs.mkdirSync(path.dirname(frame), { recursive: true });
+  fs.writeFileSync(frame, "fixture");
+  const response = await request("pokemon/clear-all", "POST", { confirmation: "清除全部寶可夢" });
+  assert.equal(response.status, 200);
+  assert.ok((await response.json()).removedPokemon > 0);
+  assert.equal(store.listPokemon().length, 0);
+  assert.equal(store.all("scans").length, 0);
+  assert.equal(store.all("transfer_batches").length, 0);
+  assert.equal(fs.existsSync(path.join(temp, "frames")), false);
+  assert.equal(store.getSnapshot()?.version, "fixture-1");
+  assert.equal((store.get<{ apiKey: string }>("settings", "runtime-config"))?.apiKey, "test-only-secret");
 });
