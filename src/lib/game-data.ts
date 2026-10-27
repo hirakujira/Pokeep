@@ -52,6 +52,8 @@ const compactMove = (id: string) =>
 // PvPoke marks these available, special-case Pokémon as unreleased because
 // ordinary PvP simulations do not cover them. They still belong in the catalog.
 const catalogExceptions = new Set(["ditto", "shedinja", "cosmog", "cosmoem"]);
+// PvPoke misspells Dusk Form Lycanroc in Rockruff's evolution list.
+const evolutionIdFixes: Record<string, string> = { lycranroc_dusk: "lycanroc_dusk" };
 // GO's zh-Hant text has no names past #1008; these come from the official Taiwan Pokédex.
 const missingSpeciesNames: Record<number, string> = {
   1011: "裹蜜蟲",
@@ -319,21 +321,29 @@ export function normalizeData(
     }
     const branches = g?.evolutionBranch || [],
       used = new Set<Raw>();
-    const evolutions = (p.family?.evolutions || []).map((e: string) => {
+    const evolutions = (p.family?.evolutions || []).map((listed: string) => {
+      const e = evolutionIdFixes[listed] ?? listed;
       // PvPoke lists a gender split such as Lechonk's once per gender under the
       // plain ID, so each listing takes the next branch that is still free.
       const free = branches.filter((b: Raw) => !used.has(b));
-      const branch =
+      const shared =
         free.find(
           (b: Raw) => norm(b.form || b.evolution || "") === norm(e),
         ) ||
         free.find((b: Raw) => norm(b.evolution || "") === norm(e)) ||
         (branches.length === 1 ? branches[0] : null);
+      // A branch only one form can take, such as Own Tempo Rockruff's Dusk
+      // Form, sits under that form's own Game Master entry.
+      const formOnly = shared ? null : [...gmPokemon]
+        .filter(([key]) => key.startsWith(`${norm(baseId)}_`))
+        .flatMap(([, settings]) => settings.evolutionBranch || [])
+        .find((b: Raw) => norm(b.form || "") === norm(e));
+      const branch = shared || formOnly;
       if (branch) used.add(branch);
       const female = `${e}_female`;
       const id = branch?.genderRequirement === "FEMALE" && pvpIds.has(female) &&
         norm(branch.form || "") === female ? female : e;
-      const conditions: string[] = [];
+      const conditions: string[] = formOnly ? ["只有特定形態的個體能進化"] : [];
       if (branch) {
         if (branch.evolutionItemRequirement)
           conditions.push(`需要進化道具 ${branch.evolutionItemRequirement}`);
@@ -344,6 +354,7 @@ export function normalizeData(
         if (
           branch.onlyNighttime ||
           branch.onlyDaytime ||
+          branch.onlyDuskPeriod ||
           branch.timeOfDayRequirement
         )
           conditions.push("有時段限制");
@@ -359,6 +370,7 @@ export function normalizeData(
           "buddyDistanceRequirement",
           "onlyNighttime",
           "onlyDaytime",
+          "onlyDuskPeriod",
           "timeOfDayRequirement",
           "questDisplay",
           "lureItemRequirement",

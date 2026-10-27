@@ -1616,6 +1616,45 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取�
   assert.equal(result.espurr.purification, undefined);
 });
 
+test("PvPoke 拼錯的鬃岩狼人（黃昏）對應到遊戲資料中我行我素岩狗狗的進化", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number, evolutions?: string[]) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["rock", "none"],
+    fastMoves: [], chargedMoves: [], ...(evolutions && { family: { evolutions } }),
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("rockruff", 744, ["lycanroc_midnight", "lycanroc_midday", "lycranroc_dusk"]),
+    base("lycanroc_midday", 745), base("lycanroc_midnight", 745), base("lycanroc_dusk", 745),
+  ];
+  const rockruff = (form: string, evolutionBranch: Record<string, unknown>[]) => ({
+    templateId: `V0744_POKEMON_${form}`,
+    data: { pokemonSettings: { form, evolutionBranch } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: { playerLevel: { cpMultiplier: Array(51).fill(0.5) } } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    rockruff("ROCKRUFF_DUSK", [
+      { evolution: "LYCANROC", candyCost: 50, form: "LYCANROC_DUSK", onlyDuskPeriod: true },
+    ]),
+    rockruff("ROCKRUFF_NORMAL", [
+      { evolution: "LYCANROC", candyCost: 50, form: "LYCANROC_MIDDAY", onlyDaytime: true },
+      { evolution: "LYCANROC", candyCost: 50, form: "LYCANROC_MIDNIGHT", onlyNighttime: true },
+    ]),
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { species: result } = normalizeData({ pokemon, moves: [] }, gm, "", ranks, "test-version");
+  assert.deepEqual(result.rockruff.evolutions.map((e) => [e.id, e.candy, e.condition]), [
+    ["lycanroc_midnight", 50, "有時段限制"],
+    ["lycanroc_midday", 50, "有時段限制"],
+    ["lycanroc_dusk", 50, "只有特定形態的個體能進化；有時段限制"],
+  ]);
+});
+
 test("遊戲資料標記可 Mega 進化或原始回歸的物種", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, tags?: string[]) => ({
