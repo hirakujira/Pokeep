@@ -8,7 +8,7 @@ export const defaultRuntimeConfig = {
   baseUrl: "",
   analysisConcurrency: 6,
   shinyReviewConcurrency: 6,
-  iphoneUseRoot: "/Users/Hiraku/Develop/utils/iPhone-use",
+  iphoneUseRoot: path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "iPhone-use"),
   iphoneUsePython: "python3",
 };
 export type RuntimeConfig = typeof defaultRuntimeConfig;

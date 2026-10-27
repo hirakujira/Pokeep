@@ -24,7 +24,7 @@ export const empty: State = {
     baseUrl: "",
     analysisConcurrency: 6,
     shinyReviewConcurrency: 6,
-    iphoneUseRoot: "/Users/Hiraku/Develop/utils/iPhone-use",
+    iphoneUseRoot: "",
     iphoneUsePython: "python3",
   },
 };
