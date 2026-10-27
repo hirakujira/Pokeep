@@ -48,7 +48,7 @@ const genderLabels: Record<string, string> = {
 };
 const shadowLabels: Record<string, string> = {
   "": "未確認",
-  none: "無暗影形態",
+  none: "一般",
   shadow: "暗影",
   purified: "暗影 - 已淨化",
 };
@@ -256,7 +256,11 @@ export function PokemonDrawer({
         key === "gender"
           ? restrictedChoice(allGenders, limits.gender, fields.gender)
           : restrictedChoice(shadowStates, limits.shadow, shadowState(fields));
-      const labels = key === "gender" ? genderLabels : shadowLabels,
+      // "無暗影形態" is only for species known to have no shadow form.
+      const noShadowForm = limits.shadow !== undefined && !limits.shadow.includes("shadow");
+      const labels = key === "gender"
+          ? genderLabels
+          : { ...shadowLabels, none: noShadowForm ? "無暗影形態" : shadowLabels.none },
         keys = key === "gender" ? [key] : shadowKeys;
       return (
         <label className="edit-field" key={key}>

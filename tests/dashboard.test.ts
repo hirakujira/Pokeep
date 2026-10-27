@@ -348,8 +348,10 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   const magnemite = render("magnemite");
   assert.match(select(magnemite, "性別"), /^<select disabled=""><option value="genderless" selected="">無性別<\/option><\/select>$/);
   assert.doesNotMatch(select(magnemite, "暗影"), /disabled/);
-  assert.deepEqual([...select(magnemite, "暗影").matchAll(/>([^<>]+)<\/option>/g)].map((m) => m[1]),
-    ["未確認", "無暗影形態", "暗影", "暗影 - 已淨化"]);
+  const labels = (html: string) => [...select(html, "暗影").matchAll(/>([^<>]+)<\/option>/g)].map((m) => m[1]);
+  assert.deepEqual(labels(magnemite), ["未確認", "一般", "暗影", "暗影 - 已淨化"]);
+  assert.deepEqual(labels(render("unknown_species")), ["未確認", "一般", "暗影", "暗影 - 已淨化"]);
+  assert.deepEqual(labels(render("tauros", { shadow: true, purified: false })), ["未確認", "無暗影形態", "暗影"]);
   assert.match(select(render("magnemite", { shadow: false, purified: true }), "暗影"),
     /<option value="purified" selected="">暗影 - 已淨化<\/option>/);
 });
