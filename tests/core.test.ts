@@ -1326,6 +1326,54 @@ test("遊戲資料記錄每個物種可能的性別，性別形態依自己的 I
   assert.deepEqual(genders("fixture_0"), [undefined, false]);
 });
 
+test("性別分歧的進化依性別對應各自的路線與物種 ID", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number, evolutions?: string[]) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [], ...(evolutions && { family: { evolutions } }),
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    // PvPoke lists both genders of a gender split under the plain ID.
+    base("espurr", 677, ["meowstic", "meowstic"]), base("meowstic", 678), base("meowstic_female", 678),
+    base("litleo", 667, ["pyroar", "pyroar"]), base("pyroar", 668),
+    base("snorunt", 361, ["froslass", "glalie"]), base("froslass", 478), base("glalie", 362),
+  ];
+  const branches = (dex: number, name: string, evolutionBranch: Record<string, unknown>[]) => ({
+    templateId: `V${String(dex).padStart(4, "0")}_POKEMON_${name}`,
+    data: { pokemonSettings: { evolutionBranch } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    branches(677, "ESPURR", [
+      { evolution: "MEOWSTIC", candyCost: 50, form: "MEOWSTIC_NORMAL", genderRequirement: "MALE" },
+      { evolution: "MEOWSTIC", candyCost: 50, form: "MEOWSTIC_FEMALE", genderRequirement: "FEMALE" },
+    ]),
+    branches(667, "LITLEO", [
+      { evolution: "PYROAR", candyCost: 50, form: "PYROAR_NORMAL", genderRequirement: "MALE" },
+      { evolution: "PYROAR", candyCost: 50, form: "PYROAR_FEMALE", genderRequirement: "FEMALE" },
+    ]),
+    branches(361, "SNORUNT", [
+      { evolution: "FROSLASS", candyCost: 100, genderRequirement: "FEMALE" },
+      { evolution: "GLALIE", candyCost: 100 },
+    ]),
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { species: result } = normalizeData({ pokemon, moves: [] }, gm, "", ranks, "test-version");
+  const evolutions = (id: string) => result[id].evolutions.map((e) => [e.id, e.gender]);
+  assert.deepEqual(evolutions("espurr"), [["meowstic", "male"], ["meowstic_female", "female"]]);
+  // Pyroar has no separate female ID, so both genders evolve into the same species.
+  assert.deepEqual(evolutions("litleo"), [["pyroar", "male"], ["pyroar", "female"]]);
+  assert.deepEqual(evolutions("snorunt"), [["froslass", "female"], ["glalie", undefined]]);
+});
+
 test("遊戲資料收集外觀形態，略過服裝、戰鬥中形態與已有物種 ID 的形態", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number) => ({

@@ -231,14 +231,22 @@ export function normalizeData(
       zh +
       (suffix ? ` ${suffix}` : "") +
       (p.tags?.includes("shadow") ? "（暗影）" : "");
-    const branches = g?.evolutionBranch || [];
+    const branches = g?.evolutionBranch || [],
+      used = new Set<Raw>();
     const evolutions = (p.family?.evolutions || []).map((e: string) => {
+      // PvPoke lists a gender split such as Lechonk's once per gender under the
+      // plain ID, so each listing takes the next branch that is still free.
+      const free = branches.filter((b: Raw) => !used.has(b));
       const branch =
-        branches.find(
+        free.find(
           (b: Raw) => norm(b.form || b.evolution || "") === norm(e),
         ) ||
-        branches.find((b: Raw) => norm(b.evolution || "") === norm(e)) ||
+        free.find((b: Raw) => norm(b.evolution || "") === norm(e)) ||
         (branches.length === 1 ? branches[0] : null);
+      if (branch) used.add(branch);
+      const female = `${e}_female`;
+      const id = branch?.genderRequirement === "FEMALE" && pvpIds.has(female) &&
+        norm(branch.form || "") === female ? female : e;
       const conditions: string[] = [];
       if (branch) {
         if (branch.evolutionItemRequirement)
@@ -274,7 +282,7 @@ export function normalizeData(
         if (branch.lureItemRequirement) conditions.push("需要特定誘餌模組");
       } else conditions.push("進化成本／條件資料不足，請核對遊戲");
       return {
-        id: e,
+        id,
         candy: branch?.candyCost ?? g?.candyToEvolve ?? 0,
         condition: conditions.length ? conditions.join("；") : null,
         gender: branch?.genderRequirement?.includes("FEMALE")
