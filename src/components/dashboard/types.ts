@@ -27,6 +27,8 @@ export type Catalog = {
     types: string[];
     form: string | null;
     genders?: Gender[];
+    /** False when the species has no evolution. */
+    evolves?: boolean;
   }[];
   moves: { id: string; name: string }[];
   visualForms: Record<string, VisualForm[]>;

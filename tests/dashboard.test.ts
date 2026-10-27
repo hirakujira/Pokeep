@@ -291,14 +291,14 @@ test("詳細資料面板以圖鑑編號與形態兩個選單顯示目前物種",
   assert.doesNotMatch(html, /暗影）<\/option>/);
 });
 
-test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單", () => {
+test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單；不可能的進化與淨化成本停用", () => {
   const catalog = {
     ...formCatalog,
     species: [
-      { id: "pidgey", dex: 16, name: "波波", types: ["normal"], form: null, genders: ["male" as const, "female" as const] },
-      { id: "tauros", dex: 128, name: "肯泰羅", types: ["normal"], form: null, genders: ["male" as const] },
-      { id: "magnemite", dex: 81, name: "小磁怪", types: ["electric"], form: null, genders: ["genderless" as const] },
-      { id: "magnemite_shadow", dex: 81, name: "小磁怪（暗影）", types: ["electric"], form: null, genders: ["genderless" as const] },
+      { id: "pidgey", dex: 16, name: "波波", types: ["normal"], form: null, genders: ["male" as const, "female" as const], evolves: true },
+      { id: "tauros", dex: 128, name: "肯泰羅", types: ["normal"], form: null, genders: ["male" as const], evolves: false },
+      { id: "magnemite", dex: 81, name: "小磁怪", types: ["electric"], form: null, genders: ["genderless" as const], evolves: true },
+      { id: "magnemite_shadow", dex: 81, name: "小磁怪（暗影）", types: ["electric"], form: null, genders: ["genderless" as const], evolves: true },
     ],
   };
   const byId = new Map(catalog.species.map((s) => [s.id, s]));
@@ -354,4 +354,21 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   assert.deepEqual(labels(render("tauros", { shadow: true, purified: false })), ["未確認", "無暗影形態", "暗影"]);
   assert.match(select(render("magnemite", { shadow: false, purified: true }), "暗影"),
     /<option value="purified" selected="">暗影 - 已淨化<\/option>/);
+
+  const input = (html: string, label: string) =>
+    html.match(new RegExp(`<span>${label}(?:(?!</label>).)*?(<input[^>]*>)`))?.[1] ?? "";
+  const blocked = (html: string, label: string) => {
+    const field = input(html, label);
+    return /disabled=""/.test(field) ? field.match(/placeholder="([^"]*)"/)?.[1] : null;
+  };
+  const costs = (html: string) => ["進化糖果", "淨化星塵", "淨化糖果"].map((label) => blocked(html, label));
+  assert.deepEqual(costs(tauros), ["無法進化", "沒有暗影形態", "沒有暗影形態"]);
+  assert.deepEqual(costs(render("magnemite", { shadow: true, purified: false })), [null, null, null]);
+  assert.deepEqual(costs(magnemite), [null, null, null]);
+  assert.deepEqual(costs(render("magnemite", { shadow: false, purified: true })), [null, "已經淨化", "已經淨化"]);
+  assert.deepEqual(costs(render("magnemite", { shadow: false, purified: false })), [null, "不是暗影寶可夢", "不是暗影寶可夢"]);
+  assert.deepEqual(costs(render("unknown_species")), [null, null, null]);
+  const misread = render("tauros", { evolutionCandy: 25, purificationDust: 3000 });
+  assert.deepEqual(costs(misread), [null, null, "沒有暗影形態"]);
+  assert.match(input(misread, "進化糖果"), /value="25"/);
 });

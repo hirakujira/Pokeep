@@ -32,6 +32,7 @@ import {
   shadowStates,
   speciesLimits,
   speciesWithShadow,
+  unavailableCost,
   unknownForm,
   withFixedValues,
   type FormOption,
@@ -195,7 +196,8 @@ export function PokemonDrawer({
   const editor = (key: keyof Fields) => {
     const bool = ["shiny", "favorite"].includes(key),
       text = ["name", "costume"].includes(key),
-      moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key);
+      moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key),
+      unavailable = unavailableCost(key, shown, speciesById);
     if (key === "speciesId") {
       const query = speciesQuery.trim().replace(/^#/, "").toLocaleLowerCase();
       const matches = entries.filter((e) =>
@@ -318,7 +320,8 @@ export function PokemonDrawer({
             min={0}
             max={key.startsWith("iv") ? 15 : undefined}
             value={String(fields[key] ?? "")}
-            placeholder="未知"
+            disabled={unavailable !== null}
+            placeholder={unavailable ?? "未知"}
             onChange={(e) =>
               set(
                 key,

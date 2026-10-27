@@ -293,6 +293,7 @@ test("清倉結果按一次放生即建立並授權唯一候選", async () => {
   store.saveSnapshot(fixture());
   const catalog = await (await request("species")).json();
   assert.equal(catalog.species.find((row: { id: string }) => row.id === "caterpie")?.dex, 10);
+  assert.equal(catalog.species.find((row: { id: string }) => row.id === "caterpie")?.evolves, false);
   const stamp = new Date().toISOString();
   const pokemon = record("direct-release", { favorite: false }, {
     analysis: { category: "transfer", currentLevels: [15] } as Pokemon["analysis"],
