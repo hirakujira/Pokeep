@@ -33,7 +33,7 @@ const { scanTiming } = await import("../src/lib/scan-timing");
 const { shinyConsensus, shinyReferenceSource, upperAppearanceImage } = await import("../src/lib/shiny-review");
 const { specialVisualConsensus, applySpecialVisualVerdict } = await import("../src/lib/special-visual-review");
 const { caughtDateBadge } = await import("../src/lib/shiny-timeline");
-const { genderlessByDex, resolveSpecies } = await import("../src/lib/game-data");
+const { gendersByDex, resolveSpecies } = await import("../src/lib/game-data");
 const { runScan, analyzeScan, analyzeOne, captureOne, applyStoredNormalShadowReviews, applyStoredShinyReviews } =
   await import("../src/lib/iphone-scan");
 after(() => {
@@ -456,16 +456,16 @@ test("只有 Game Master 所有形態都明確無性別時才補上無性別", (
     templateId: `SPAWN_V${String(dex).padStart(4, "0")}_POKEMON_${form}`,
     data: { genderSettings: { gender: ratio } },
   });
-  const genderless = genderlessByDex([
+  const genders = gendersByDex([
     gender(81, "MAGNEMITE", { genderlessPercent: 1 }),
     gender(81, "MAGNEMITE_NORMAL", { genderlessPercent: 1 }),
     gender(25, "PIKACHU", { malePercent: 0.5, femalePercent: 0.5 }),
     gender(26, "RAICHU", { genderlessPercent: 1 }),
     gender(26, "RAICHU_ALOLA", { malePercent: 0.5, femalePercent: 0.5 }),
   ]);
-  assert.equal(genderless.has(81), true);
-  assert.equal(genderless.has(25), false);
-  assert.equal(genderless.has(26), false);
+  assert.deepEqual(genders.get(81), ["genderless"]);
+  assert.deepEqual(genders.get(25), ["male", "female"]);
+  assert.deepEqual(genders.get(26), ["male", "female", "genderless"]);
   const species = { ...fixture().species.caterpie, genderless: true };
   assert.deepEqual(safety.speciesGender(null, species), {
     gender: "genderless",

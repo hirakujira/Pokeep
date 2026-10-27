@@ -167,6 +167,14 @@ select {
 .list-controls select:hover {
   border-color: var(--ink-2);
 }
+.edit-field select:disabled {
+  border-color: var(--line);
+  background-color: var(--surface-2);
+  background-image: none;
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
 .edit-field input:focus,
 .edit-field select:focus,
 .preference-fields input:focus,

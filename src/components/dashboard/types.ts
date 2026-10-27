@@ -1,4 +1,4 @@
-import type { Pokemon, Settings, VisualForm } from "@/lib/types";
+import type { Gender, Pokemon, Settings, VisualForm } from "@/lib/types";
 import type { Scan, TransferBatch } from "@/lib/iphone-types";
 import type { ScanTiming } from "@/lib/scan-timing";
 import type { PublicRuntimeConfig } from "@/lib/runtime-config";
@@ -20,7 +20,14 @@ export type State = {
   runtime: PublicRuntimeConfig;
 };
 export type Catalog = {
-  species: { id: string; dex: number; name: string; types: string[]; form: string | null }[];
+  species: {
+    id: string;
+    dex: number;
+    name: string;
+    types: string[];
+    form: string | null;
+    genders?: Gender[];
+  }[];
   moves: { id: string; name: string }[];
   visualForms: Record<string, VisualForm[]>;
 };

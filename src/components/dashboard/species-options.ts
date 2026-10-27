@@ -1,6 +1,8 @@
 import { localizeForm, normalFormTexts } from "@/lib/species-names";
-import type { VisualForm } from "@/lib/types";
+import type { Fields, Gender, VisualForm } from "@/lib/types";
 import type { Catalog } from "./types";
+
+type CatalogSpecies = Catalog["species"][number];
 
 export type FormOption = {
   key: string;
@@ -21,7 +23,7 @@ const normalForm = "一般";
 const unknownFormBases = new Set(["squawkabilly"]);
 const normalTexts = new Set(normalFormTexts);
 
-function catalogFormLabel(s: Catalog["species"][number]) {
+function catalogFormLabel(s: CatalogSpecies) {
   if (unknownFormBases.has(s.id)) return unknownForm;
   if (!s.form) return normalForm;
   if (!s.form.startsWith("(")) return s.form;
@@ -94,8 +96,41 @@ export function formChoice(entry: DexEntry, speciesId: string | null, form: stri
   return { options: [kept, ...entry.options], selected: kept };
 }
 
-export function speciesWithShadow(id: string, shadow: boolean | null, ids: Set<string>) {
+export function speciesWithShadow(id: string, shadow: boolean | null, ids: { has(id: string): boolean }) {
   if (shadow === null) return id;
   const base = id.replace(/_shadow$/, "");
   return shadow && ids.has(`${base}_shadow`) ? `${base}_shadow` : base;
+}
+
+export const allGenders: Gender[] = ["male", "female", "genderless"];
+
+/**
+ * The choices a select offers when the species limits its values. A single
+ * allowed value is fixed; a stored value the species does not allow stays
+ * listed so the conflict can be seen and fixed.
+ */
+export function restrictedChoice<T>(all: T[], allowed: T[] | undefined, current: T | null) {
+  const values = allowed ?? all;
+  if (values.length === 1 && (current === null || current === values[0]))
+    return { options: values as (T | null)[], value: values[0] as T | null, fixed: true };
+  const conflict = current !== null && !values.includes(current) ? [current] : [];
+  return { options: [null, ...values, ...conflict], value: current, fixed: false };
+}
+
+/** Gender and shadow values the species allows; undefined while the species is unknown. */
+export function speciesLimits(speciesId: string | null, species: Map<string, CatalogSpecies>) {
+  const s = speciesId ? species.get(speciesId) : undefined;
+  if (!s) return { gender: undefined, shadow: undefined };
+  const hasShadow = species.has(`${s.id.replace(/_shadow$/, "")}_shadow`);
+  return { gender: s.genders, shadow: hasShadow ? [true, false] : [false] };
+}
+
+/** Fields with the values the species fixes filled in, so saving stores what the drawer shows. */
+export function withFixedValues(f: Fields, species: Map<string, CatalogSpecies>): Fields {
+  const limits = speciesLimits(f.speciesId, species);
+  return {
+    ...f,
+    gender: restrictedChoice(allGenders, limits.gender, f.gender).value,
+    shadow: restrictedChoice([true, false], limits.shadow, f.shadow).value,
+  };
 }

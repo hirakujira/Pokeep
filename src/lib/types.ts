@@ -36,6 +36,7 @@ export const fieldsSchema = z.object({
   purificationCandy: numberOrNull,
 });
 export type Fields = z.infer<typeof fieldsSchema>;
+export type Gender = NonNullable<Fields["gender"]>;
 export const emptyFields = (): Fields =>
   Object.fromEntries(
     Object.keys(fieldsSchema.shape).map((k) => [k, null]),
@@ -232,8 +233,10 @@ export type Species = {
   id: string;
   dex: number;
   name: string;
-  /** True only when every Game Master gender entry for this dex is genderless. */
+  /** True when the species is always genderless. */
   genderless?: boolean;
+  /** Genders this species can have; missing when the Game Master gives none. */
+  genders?: Gender[];
   types: string[];
   atk: number;
   def: number;

@@ -1279,6 +1279,53 @@ test("物種目錄包含脫殼忍者與已知形態，補上文字檔缺少的�
   assert.equal(normalized.species.squawkabilly_green.name, "怒鸚哥（綠羽）");
 });
 
+test("遊戲資料記錄每個物種可能的性別，性別形態依自己的 ID 固定", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [],
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("pikachu", 25), base("magnemite", 81), base("magnemite_shadow", 81), base("tauros", 128),
+    base("meowstic", 678), base("meowstic_female", 678), base("indeedee_male", 876),
+  ];
+  const gender = (dex: number, form: string, ratio: Record<string, number>) => ({
+    templateId: `SPAWN_V${String(dex).padStart(4, "0")}_POKEMON_${form}`,
+    data: { genderSettings: { gender: ratio } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    gender(25, "PIKACHU", { malePercent: 0.5, femalePercent: 0.5 }),
+    gender(25, "PIKACHU_POP_STAR", { femalePercent: 1 }),
+    gender(81, "MAGNEMITE", { genderlessPercent: 1 }),
+    gender(128, "TAUROS", { malePercent: 1 }),
+    gender(128, "TAUROS_PALDEA_COMBAT", { malePercent: 1 }),
+    gender(678, "MEOWSTIC", { malePercent: 1 }),
+    gender(678, "MEOWSTIC_FEMALE", { femalePercent: 1 }),
+    gender(876, "INDEEDEE_MALE", { malePercent: 1 }),
+    gender(876, "INDEEDEE_FEMALE", { femalePercent: 1 }),
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { species: result } = normalizeData({ pokemon, moves: [] }, gm, "", ranks, "test-version");
+  const genders = (id: string) => [result[id].genders, result[id].genderless];
+  assert.deepEqual(genders("pikachu"), [["male", "female"], false]);
+  assert.deepEqual(genders("magnemite"), [["genderless"], true]);
+  assert.deepEqual(genders("magnemite_shadow"), [["genderless"], true]);
+  assert.deepEqual(genders("tauros"), [["male"], false]);
+  assert.deepEqual(genders("meowstic"), [["male"], false]);
+  assert.deepEqual(genders("meowstic_female"), [["female"], false]);
+  assert.deepEqual(genders("indeedee_male"), [["male"], false]);
+  assert.deepEqual(genders("fixture_0"), [undefined, false]);
+});
+
 test("遊戲資料收集外觀形態，略過服裝、戰鬥中形態與已有物種 ID 的形態", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number) => ({

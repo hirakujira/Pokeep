@@ -22,15 +22,28 @@ import {
   speciesLabel,
 } from "./format";
 import {
+  allGenders,
   dexEntries,
   formChoice,
   keptFormKey,
+  restrictedChoice,
+  speciesLimits,
   speciesWithShadow,
   unknownForm,
+  withFixedValues,
   type FormOption,
 } from "./species-options";
 import type { Catalog } from "./types";
 import { Status } from "./ui";
+
+const choiceLabels: Record<string, string> = {
+  "": "未知",
+  true: "是",
+  false: "否",
+  male: "雄性",
+  female: "雌性",
+  genderless: "無性別",
+};
 
 export function PokemonDrawer({
   pokemon: p,
@@ -115,12 +128,13 @@ export function PokemonDrawer({
     activeSource = p.sources[Math.min(source, p.sources.length - 1)],
     moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
   const entries = useMemo(() => dexEntries(catalog.species, catalog.visualForms), [catalog]),
-    speciesIds = useMemo(() => new Set(catalog.species.map((s) => s.id)), [catalog]);
+    speciesById = useMemo(() => new Map(catalog.species.map((s) => [s.id, s])), [catalog]);
   const reviewPrompts = reviewPromptsFor(p);
+  const shown = withFixedValues(fields, speciesById);
   const changes = Object.fromEntries(
-    (Object.keys(fields) as (keyof Fields)[])
-      .filter((key) => fields[key] !== effective(p)[key])
-      .map((key) => [key, fields[key]]),
+    (Object.keys(shown) as (keyof Fields)[])
+      .filter((key) => shown[key] !== effective(p)[key])
+      .map((key) => [key, shown[key]]),
   );
   const set = (key: keyof Fields, value: Fields[keyof Fields]) => {
     setFields((f) => ({ ...f, [key]: value }));
@@ -152,7 +166,7 @@ export function PokemonDrawer({
   const applyForm = (option: FormOption) => {
     setFields((f) => ({
       ...f,
-      speciesId: option.speciesId && speciesWithShadow(option.speciesId, f.shadow, speciesIds),
+      speciesId: option.speciesId && speciesWithShadow(option.speciesId, f.shadow, speciesById),
       form: option.form,
     }));
     setVerified(false);
@@ -228,38 +242,50 @@ export function PokemonDrawer({
         </label>
       );
     }
+    if (key === "gender" || key === "shadow") {
+      const limits = speciesLimits(fields.speciesId, speciesById);
+      const choice: { options: (string | boolean | null)[]; value: string | boolean | null; fixed: boolean } =
+        key === "gender"
+          ? restrictedChoice(allGenders, limits.gender, fields.gender)
+          : restrictedChoice([true, false], limits.shadow, fields.shadow);
+      return (
+        <label className="edit-field" key={key}>
+          {heading(key)}
+          <select
+            value={String(choice.value ?? "")}
+            disabled={choice.fixed}
+            onChange={(e) => {
+              if (key === "gender") return set(key, (e.target.value || null) as Fields["gender"]);
+              const value = e.target.value === "" ? null : e.target.value === "true";
+              setFields((f) => ({
+                ...f,
+                shadow: value,
+                speciesId: f.speciesId && speciesWithShadow(f.speciesId, value, speciesById),
+              }));
+              setVerified(false);
+            }}
+          >
+            {choice.options.map((option) => (
+              <option key={String(option)} value={String(option ?? "")}>
+                {choiceLabels[String(option ?? "")]}
+              </option>
+            ))}
+          </select>
+          {note(key)}
+        </label>
+      );
+    }
     return (
       <label className="edit-field" key={key}>
         {heading(key)}
         {bool ? (
           <select
             value={fields[key] === null ? "" : String(fields[key])}
-            onChange={(e) => {
-              const value = e.target.value === "" ? null : e.target.value === "true";
-              if (key !== "shadow") return set(key, value);
-              setFields((f) => ({
-                ...f,
-                shadow: value,
-                speciesId: f.speciesId && speciesWithShadow(f.speciesId, value, speciesIds),
-              }));
-              setVerified(false);
-            }}
+            onChange={(e) => set(key, e.target.value === "" ? null : e.target.value === "true")}
           >
             <option value="">未知</option>
             <option value="true">是</option>
             <option value="false">否</option>
-          </select>
-        ) : key === "gender" ? (
-          <select
-            value={fields.gender || ""}
-            onChange={(e) =>
-              set(key, (e.target.value as Fields["gender"]) || null)
-            }
-          >
-            <option value="">未知</option>
-            <option value="male">雄性</option>
-            <option value="female">雌性</option>
-            <option value="genderless">無性別</option>
           </select>
         ) : moves ? (
           <>

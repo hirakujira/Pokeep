@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import {
   emptyFields,
   type Analysis,
+  type Fields,
   type MoveTrainingAdvice,
   type MoveTrainingStep,
   type RaidResult,
@@ -199,7 +200,8 @@ test("個體詳情列出各用途的學習器步驟與先進化提示", () => {
   assert.ok(html.includes("培養目標是進化後的 巴大蝶"));
 });
 
-const { dexEntries, formChoice, speciesWithShadow } = await import("../src/components/dashboard/species-options");
+const { dexEntries, formChoice, speciesWithShadow, restrictedChoice, withFixedValues } =
+  await import("../src/components/dashboard/species-options");
 const { PokemonDrawer } = await import("../src/components/dashboard/pokemon-drawer");
 const catalogSpecies = (rows: [string, number, string, string | null][]) =>
   rows.map(([id, dex, name, form]) => ({ id, dex, name, types: ["normal"], form }));
@@ -286,4 +288,53 @@ test("詳細資料面板以圖鑑編號與形態兩個選單顯示目前物種",
   assert.match(html, /<option value="east_sea" selected="">東海<\/option>/);
   assert.match(html, /<option value="">待確認<\/option>/);
   assert.doesNotMatch(html, /暗影）<\/option>/);
+});
+
+test("性別與暗影依物種限制選項，只剩一個值時固定並停用", () => {
+  const catalog = {
+    ...formCatalog,
+    species: [
+      { id: "pidgey", dex: 16, name: "波波", types: ["normal"], form: null, genders: ["male" as const, "female" as const] },
+      { id: "tauros", dex: 128, name: "肯泰羅", types: ["normal"], form: null, genders: ["male" as const] },
+      { id: "magnemite", dex: 81, name: "小磁怪", types: ["electric"], form: null, genders: ["genderless" as const] },
+      { id: "magnemite_shadow", dex: 81, name: "小磁怪（暗影）", types: ["electric"], form: null, genders: ["genderless" as const] },
+    ],
+  };
+  const byId = new Map(catalog.species.map((s) => [s.id, s]));
+  const fixed = (speciesId: string, patch: Partial<Fields> = {}) => {
+    const f = withFixedValues({ ...emptyFields(), speciesId, ...patch }, byId);
+    return [f.gender, f.shadow];
+  };
+  assert.deepEqual(fixed("tauros"), ["male", false]);
+  assert.deepEqual(fixed("magnemite"), ["genderless", null]);
+  assert.deepEqual(fixed("pidgey"), [null, false]);
+  assert.deepEqual(fixed("tauros", { gender: "female", shadow: true }), ["female", true]);
+  assert.deepEqual(restrictedChoice(["male", "female"], ["male"], "female"),
+    { options: [null, "male", "female"], value: "female", fixed: false });
+  assert.deepEqual(restrictedChoice(["male", "female", "genderless"], undefined, null).options,
+    [null, "male", "female", "genderless"]);
+
+  const render = (speciesId: string) => renderToString(React.createElement(PokemonDrawer, {
+    pokemon: record(speciesId, { speciesId, gender: null, shadow: null }),
+    records: [],
+    catalog,
+    error: "",
+    onClose: () => {},
+    onSave: async () => null,
+    onMerge: async () => {},
+    busy: false,
+  }));
+  const select = (html: string, label: string) =>
+    html.match(new RegExp(`<span>${label}(?:(?!</label>).)*?(<select[^>]*>.*?</select>)`))?.[1] ?? "";
+  const tauros = render("tauros");
+  assert.match(select(tauros, "性別"), /^<select disabled="">/);
+  assert.equal(select(tauros, "性別").match(/<option/g)?.length, 1);
+  assert.match(select(tauros, "性別"), /雄性/);
+  assert.match(select(tauros, "暗影"), /^<select disabled=""><option value="false" selected="">否<\/option><\/select>$/);
+  const pidgey = select(render("pidgey"), "性別");
+  assert.doesNotMatch(pidgey, /disabled|無性別/);
+  assert.match(pidgey, /雌性/);
+  const magnemite = render("magnemite");
+  assert.match(select(magnemite, "性別"), /^<select disabled=""><option value="genderless" selected="">無性別<\/option><\/select>$/);
+  assert.doesNotMatch(select(magnemite, "暗影"), /disabled/);
 });

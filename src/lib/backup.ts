@@ -208,6 +208,7 @@ const snapshotSchema = z.object({
       dex: z.number().int().min(1),
       name: z.string(),
       genderless: z.boolean().optional(),
+      genders: z.array(z.enum(["male", "female", "genderless"])).optional(),
       types: z.array(z.string()),
       atk: z.number().positive(),
       def: z.number().positive(),

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { dataDir, getSnapshot, saveSnapshot } from "./store";
-import type { Fields, Snapshot, Species, VisualForm } from "./types";
+import type { Fields, Gender, Snapshot, Species, VisualForm } from "./types";
 import { moveName } from "./move-names";
 
 const urls: Record<string, string> = {
@@ -160,23 +160,31 @@ export function visualFormsByDex(
     ];
   }
   return result;
-}export function genderlessByDex(gm: Raw[]) {
-  const entries = new Map<number, boolean[]>();
+}
+/** Every gender any Game Master spawn entry of a dex can have, in a fixed order. */
+export function gendersByDex(gm: Raw[]) {
+  const seen = new Map<number, Set<Gender>>();
   for (const row of gm) {
     const dex = row.templateId?.match(/^SPAWN_V(\d+)_POKEMON_/);
     const gender = row.data?.genderSettings?.gender;
     if (!dex || !gender) continue;
-    const number = Number(dex[1]);
-    entries.set(number, [
-      ...(entries.get(number) || []),
-      gender.genderlessPercent === 1 &&
-        !gender.malePercent &&
-        !gender.femalePercent,
-    ]);
+    const set = seen.get(Number(dex[1])) ?? new Set<Gender>();
+    if (gender.malePercent) set.add("male");
+    if (gender.femalePercent) set.add("female");
+    if (gender.genderlessPercent) set.add("genderless");
+    seen.set(Number(dex[1]), set);
   }
-  return new Set(
-    [...entries].filter(([, values]) => values.every(Boolean)).map(([dex]) => dex),
+  const order: Gender[] = ["male", "female", "genderless"];
+  return new Map(
+    [...seen].filter(([, set]) => set.size).map(([dex, set]) => [dex, order.filter((g) => set.has(g))]),
   );
+}
+// Gender forms such as meowstic_female have their own IDs; the plain ID is the male form.
+function speciesGenders(id: string, dexGenders: Gender[] | undefined, ids: Set<string>) {
+  const base = id.replace(/_shadow$/, "");
+  const form = base.match(/_(male|female)$/)?.[1] as Gender | undefined;
+  if (form) return [form];
+  return ids.has(`${base}_female`) ? ["male" as const] : dexGenders;
 }
 export function normalizeData(
   pvp: Raw,
@@ -193,7 +201,8 @@ export function normalizeData(
     throw new Error("遊戲資料格式不符，已保留舊版本");
   const tr = parseTexts(texts),
     gmPokemon = new Map<string, Raw>();
-  const genderlessDex = genderlessByDex(gm);
+  const dexGenders = gendersByDex(gm),
+    pvpIds = new Set<string>(pvp.pokemon.map((p: Raw) => p.speciesId));
   for (const row of gm)
     if (row.data?.pokemonSettings)
       gmPokemon.set(
@@ -275,14 +284,16 @@ export function normalizeData(
             : undefined,
       };
     });
-    const tags = [...(p.tags || [])];
+    const tags = [...(p.tags || [])],
+      genders = speciesGenders(p.speciesId, dexGenders.get(p.dex), pvpIds);
     if (g?.pokemonClass?.includes("LEGENDARY")) tags.push("legendary");
     if (g?.pokemonClass?.includes("MYTHIC")) tags.push("mythical");
     species[p.speciesId] = {
       id: p.speciesId,
       dex: p.dex,
       name,
-      genderless: genderlessDex.has(p.dex),
+      genderless: genders?.length === 1 && genders[0] === "genderless",
+      genders,
       types: p.types.filter((t: string) => t !== "none"),
       atk: p.baseStats.atk,
       def: p.baseStats.def,
