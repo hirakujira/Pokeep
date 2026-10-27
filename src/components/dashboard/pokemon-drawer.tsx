@@ -1,0 +1,604 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  CircleHelp,
+  Film,
+  LoaderCircle,
+  LockKeyhole,
+  X,
+} from "lucide-react";
+import { effective, fieldLabels, type Fields, type Pokemon } from "@/lib/types";
+import { localizeMoveText, moveName } from "@/lib/move-names";
+import { localizeSpeciesName } from "@/lib/species-names";
+import { DrawerAnalysis } from "./drawer-analysis";
+import {
+  displayPokemonName,
+  reviewPromptsFor,
+  sourceName,
+  sourceTime,
+  speciesLabel,
+} from "./format";
+import type { Catalog } from "./types";
+import { Status } from "./ui";
+
+export function PokemonDrawer({
+  pokemon: p,
+  records,
+  catalog,
+  error,
+  onClose,
+  onSave,
+  onMerge,
+  busy,
+}: {
+  pokemon: Pokemon;
+  records: Pokemon[];
+  catalog: Catalog;
+  error: string;
+  onClose: () => void;
+  onSave: (data: unknown, announce?: boolean) => Promise<Pokemon | null>;
+  onMerge: (id: string) => Promise<void>;
+  busy: boolean;
+}) {
+  const [section, setSection] = useState("review"),
+    [fields, setFields] = useState<Fields>(effective(p)),
+    [speciesQuery, setSpeciesQuery] = useState(""),
+    [source, setSource] = useState(0),
+    [verified, setVerified] = useState(p.verified),
+    [evolutionSilhouette, setEvolutionSilhouette] = useState<boolean | "unavailable" | "unknown-branch" | null>(
+      p.evolutionSilhouette ?? null,
+    ),
+    [maxStatus, setMaxStatus] = useState<Pokemon["maxStatus"]>(
+      p.maxStatus ?? null,
+    ),
+    [dismiss, setDismiss] = useState(false),
+    [saveReviewReasons, setSaveReviewReasons] = useState<string[] | null>(null),
+    [proofError, setProofError] = useState(false);
+  const closeButton = useRef<HTMLButtonElement>(null),
+    panelRef = useRef<HTMLElement>(null),
+    scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setFields(effective(p));
+    setSpeciesQuery("");
+    setVerified(p.verified);
+    setEvolutionSilhouette(p.evolutionSilhouette ?? null);
+    setMaxStatus(p.maxStatus ?? null);
+    setDismiss(false);
+  }, [p.id, p.updatedAt, p.verified, p.locked, p.owned]);
+  useEffect(() => {
+    setProofError(false);
+  }, [source]);
+  useEffect(() => {
+    const old = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = "hidden";
+    closeButton.current?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "Tab") {
+        const elements = Array.from(
+          panelRef.current?.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), a[href], input, select, textarea, [tabindex="0"]',
+          ) || [],
+        );
+        const first = elements[0],
+          last = elements.at(-1);
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", key);
+      old?.focus();
+    };
+  }, [onClose]);
+  const a = p.analysis,
+    activeSource = p.sources[Math.min(source, p.sources.length - 1)],
+    moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
+  const reviewPrompts = reviewPromptsFor(p);
+  const changes = Object.fromEntries(
+    (Object.keys(fields) as (keyof Fields)[])
+      .filter((key) => fields[key] !== effective(p)[key])
+      .map((key) => [key, fields[key]]),
+  );
+  const set = (key: keyof Fields, value: Fields[keyof Fields]) => {
+    setFields((f) => ({ ...f, [key]: value }));
+    setVerified(false);
+  };
+  const sourceFor = (key: keyof Fields) =>
+    p.sources.filter((s) => s.fields.includes(key));
+  const editor = (key: keyof Fields) => {
+    const bool = ["shadow", "purified", "shiny", "favorite"].includes(key),
+      text = ["name", "form", "costume"].includes(key),
+      moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key);
+    if (key === "speciesId") {
+      const query = speciesQuery.trim().replace(/^#/, "").toLocaleLowerCase();
+      const matches = catalog.species.filter((s) =>
+        !query || String(s.dex).includes(query) ||
+        s.name.toLocaleLowerCase().includes(query) ||
+        localizeSpeciesName(s.name, s.id).toLocaleLowerCase().includes(query) ||
+        s.id.toLocaleLowerCase().includes(query));
+      const options = fields.speciesId && !matches.some((s) => s.id === fields.speciesId)
+        ? [...catalog.species.filter((s) => s.id === fields.speciesId), ...matches]
+        : matches;
+      return (
+        <div className="edit-field" key={key}>
+          <span>
+            {fieldLabels[key]}
+            {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
+          </span>
+          <input
+            aria-label="搜尋物種"
+            value={speciesQuery}
+            placeholder="搜尋中文名稱、圖鑑編號或英文 ID"
+            onChange={(e) => setSpeciesQuery(e.target.value)}
+          />
+          <select
+            aria-label="物種／形態"
+            value={fields.speciesId || ""}
+            onChange={(e) => {
+              const s = catalog.species.find((row) => row.id === e.target.value);
+              setFields((f) => ({
+                ...f,
+                speciesId: e.target.value || null,
+                ...(s ? {
+                  shadow: s.id.endsWith("_shadow"),
+                  name: f.name || s.name.split(" ")[0],
+                } : {}),
+              }));
+              setVerified(false);
+            }}
+          >
+            <option value="">選擇物種／形態</option>
+            {options.map((s) => (
+              <option key={s.id} value={s.id}>
+                #{s.dex} {localizeSpeciesName(s.name, s.id)}
+              </option>
+            ))}
+          </select>
+          <small>{query ? `找到 ${matches.length} 種物種／形態` :
+            `${catalog.species.length} 種物種／形態`}</small>
+        </div>
+      );
+    }
+    return (
+      <label className="edit-field" key={key}>
+        <span>
+          {fieldLabels[key]}
+          {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
+        </span>
+        {bool ? (
+          <select
+            value={fields[key] === null ? "" : String(fields[key])}
+            onChange={(e) =>
+              set(key, e.target.value === "" ? null : e.target.value === "true")
+            }
+          >
+            <option value="">未知</option>
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        ) : key === "gender" ? (
+          <select
+            value={fields.gender || ""}
+            onChange={(e) =>
+              set(key, (e.target.value as Fields["gender"]) || null)
+            }
+          >
+            <option value="">未知</option>
+            <option value="male">雄性</option>
+            <option value="female">雌性</option>
+            <option value="genderless">無性別</option>
+          </select>
+        ) : moves ? (
+          <>
+            <input
+              list="move-options"
+              value={fields[key] ? moveName(String(fields[key]), moveNames) : ""}
+              placeholder="未顯示／未知"
+              onChange={(e) => set(key, e.target.value || null)}
+            />
+          </>
+        ) : (
+          <input
+            type={text ? "text" : "number"}
+            step={["height", "weight"].includes(key) ? "0.01" : "1"}
+            min={0}
+            max={key.startsWith("iv") ? 15 : undefined}
+            value={String(fields[key] ?? "")}
+            placeholder="未知"
+            onChange={(e) =>
+              set(
+                key,
+                e.target.value === ""
+                  ? null
+                  : text
+                    ? e.target.value
+                    : Number(e.target.value),
+              )
+            }
+          />
+        )}
+        <small>
+          {sourceFor(key).length
+            ? `${sourceFor(key).length} 張畫面可核對`
+            : Object.hasOwn(p.overrides, key)
+              ? "人工補充"
+              : "來源未顯示"}
+        </small>
+      </label>
+    );
+  };
+  return (
+    <div
+      className="drawer-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section
+        ref={panelRef}
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-title"
+      >
+        <div className="drawer-heading">
+          <div>
+            <h2 id="drawer-title">
+              {displayPokemonName(fields.name || "待辨識個體", fields.costume, fields.speciesId)}
+              <Status category={a?.category || "review"} />
+            </h2>
+            <p>
+              {speciesLabel(catalog, fields.speciesId, fields.name)} · {p.sources.length}{" "}
+              張來源畫面
+            </p>
+          </div>
+          <button
+            ref={closeButton}
+            className="icon-button"
+            aria-label="關閉個體詳情"
+            onClick={onClose}
+          >
+            <X size={21} />
+          </button>
+        </div>
+        <div className="drawer-tabs">
+          {[
+            { id: "review", label: "辨識核對" },
+            { id: "analysis", label: "分析建議" },
+            { id: "sources", label: "來源證據" },
+          ].map((t) => (
+            <button
+              className={section === t.id ? "active" : ""}
+              key={t.id}
+              onClick={() => setSection(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div ref={scrollRef} className="drawer-scroll">
+          {error && (
+            <div className="alert error" role="alert">
+              <CircleHelp size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+          {section === "review" && saveReviewReasons && (
+            <div className="alert error review-save-error" role="alert">
+              <CircleHelp size={16} />
+              <div>
+                <strong>已儲存，但仍無法判定。請確認：</strong>
+                <ul>
+                  {saveReviewReasons.map((reason, i) => (
+                    <li key={i}>{localizeSpeciesName(localizeMoveText(reason, moveNames))}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          {section === "review" && (
+            <>
+              {!saveReviewReasons && reviewPrompts.length > 0 && (
+                <details className="review-issues" open>
+                  <summary>
+                    <CircleHelp size={15} />
+                    請對照來源畫面確認（{reviewPrompts.length}）
+                  </summary>
+                  <ul>
+                    {reviewPrompts.map((reason, i) => (
+                      <li key={i}>{localizeSpeciesName(localizeMoveText(reason, moveNames))}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {p.candidates.length > 0 && (
+                <div className="candidate-box">
+                  <h3>疑似同一隻寶可夢</h3>
+                  <p>核對來源後再合併；如果確定是不同個體，請勾選下方選項。</p>
+                  {p.candidates.map((candidate) => {
+                    const peer = records.find((r) => r.id === candidate);
+                    if (!peer) return null;
+                    const f = effective(peer);
+                    return (
+                      <div key={candidate}>
+                        <span>
+                          {f.name || "未辨識"} · CP {f.cp ?? "?"} ·{" "}
+                          {peer.sources.length} 張來源
+                        </span>
+                        <button
+                          className="button small secondary"
+                          disabled={busy}
+                          onClick={() => void onMerge(candidate)}
+                        >
+                          合併至此個體
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={dismiss}
+                      onChange={(e) => setDismiss(e.target.checked)}
+                    />
+                    我確認這些是不同個體，解除疑似配對
+                  </label>
+                </div>
+              )}
+              <div className="review-layout">
+                <div className="review-proof">
+                  {activeSource && !proofError ? (
+                    <img
+                      src={`/api/frames/${activeSource.frame}`}
+                      alt={`${sourceName(activeSource)} ${sourceTime(activeSource)} 來源截圖`}
+                      onError={() => setProofError(true)}
+                    />
+                  ) : (
+                    <div className="missing-proof">
+                      <Film size={28} />
+                      來源截圖不存在
+                    </div>
+                  )}
+                  {activeSource && (
+                    <div>
+                      <strong>{sourceTime(activeSource)}</strong>
+                      <small>{sourceName(activeSource)}</small>
+                      <button
+                        className="text-button"
+                        onClick={() => setSection("sources")}
+                      >
+                        查看所有來源
+                        <ArrowRight size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="edit-fields">
+                  <h3>基本資訊</h3>
+                  {(
+                    [
+                      "name",
+                      "speciesId",
+                      "form",
+                      "cp",
+                      "hp",
+                      "gender",
+                      "height",
+                      "weight",
+                    ] as (keyof Fields)[]
+                  ).map(editor)}
+                  <h3>收藏與個體能力</h3>
+                  {(
+                    [
+                      "shadow",
+                      "purified",
+                      "shiny",
+                      "costume",
+                      "favorite",
+                      "ivAtk",
+                      "ivDef",
+                      "ivSta",
+                    ] as (keyof Fields)[]
+                  ).map(editor)}
+                  <h3>目前招式</h3>
+                  {(
+                    [
+                      "fastMove",
+                      "chargeMove",
+                      "chargeMove2",
+                    ] as (keyof Fields)[]
+                  ).map(editor)}
+                  <label className="edit-field">
+                    <span>進化按鈕狀態</span>
+                    <select
+                      value={
+                        evolutionSilhouette === null
+                          ? ""
+                          : String(evolutionSilhouette)
+                      }
+                      onChange={(event) =>
+                        setEvolutionSilhouette(
+                          event.target.value === ""
+                            ? null
+                            : event.target.value === "unavailable"
+                              ? "unavailable"
+                              : event.target.value === "unknown-branch"
+                                ? "unknown-branch"
+                                : event.target.value === "true",
+                        )
+                      }
+                    >
+                      <option value="">未能確認</option>
+                      <option value="true">未登錄剪影</option>
+                      <option value="false">已登錄彩色圖示</option>
+                      <option value="unknown-branch">進化結果不明（例如問號）</option>
+                      <option value="unavailable">無法進化（沒有進化按鈕）</option>
+                    </select>
+                    <small>從招式頁判定；問號代表有進化按鈕，但無法確定結果。特殊造型等個體可能沒有進化按鈕。</small>
+                  </label>
+                  <label className="edit-field">
+                    <span>極巨化狀態</span>
+                    <select
+                      value={maxStatus ?? ""}
+                      onChange={(event) => setMaxStatus(
+                        event.target.value === "" ? null :
+                        event.target.value as "none" | "dynamax" | "gigantamax",
+                      )}
+                    >
+                      <option value="">未能確認</option>
+                      <option value="none">一般個體</option>
+                      <option value="dynamax">極巨化</option>
+                      <option value="gigantamax">超極巨化</option>
+                    </select>
+                    <small>依能力頁上的極巨化徽章判定；可在此人工修正。</small>
+                  </label>
+                  <details className="cost-edit">
+                    <summary>
+                      資源與畫面顯示成本
+                      <ChevronDown size={14} />
+                    </summary>
+                    <div className="edit-fields">
+                      {(
+                        [
+                          "candy",
+                          "xlCandy",
+                          "stardust",
+                          "powerUpDust",
+                          "powerUpCandy",
+                          "evolutionCandy",
+                          "secondMoveDust",
+                          "secondMoveCandy",
+                          "purificationDust",
+                          "purificationCandy",
+                        ] as (keyof Fields)[]
+                      ).map(editor)}
+                    </div>
+                  </details>
+                  <datalist id="move-options">
+                    {catalog.moves.map((m) => (
+                      <option key={m.id} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+            </>
+          )}
+          {section === "analysis" && (
+            <DrawerAnalysis analysis={a} fields={fields} moveNames={moveNames} />
+          )}
+          {section === "sources" && (
+            <div className="sources-view">
+              <p>點選截圖可回到「辨識核對」對照欄位。</p>
+              <div className="source-grid">
+                {p.sources.map((s, i) => (
+                  <button
+                    className={source === i ? "selected" : ""}
+                    key={`${s.observationId}-${i}`}
+                    onClick={() => {
+                      setSource(i);
+                      setSection("review");
+                    }}
+                  >
+                    <img
+                      src={`/api/frames/${s.frame}`}
+                      alt={`${sourceName(s)} ${sourceTime(s)} 來源畫面`}
+                      loading="lazy"
+                    />
+                    <strong>{sourceTime(s)}</strong>
+                    <small>{sourceName(s)}</small>
+                    <span>{s.fields.length} 個可見欄位</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="drawer-footer">
+          <div>
+            <button
+              className={`button small ${p.locked ? "locked-button" : "secondary"}`}
+              disabled={busy}
+              onClick={() => void onSave({ locked: !p.locked })}
+            >
+              <LockKeyhole size={14} />
+              {p.locked ? "已鎖定保留" : "鎖定保留"}
+            </button>
+            <button
+              className="text-button"
+              disabled={busy}
+              onClick={() => void onSave({ owned: !p.owned })}
+            >
+              {p.owned ? "標記已放生" : "恢復為持有"}
+            </button>
+          </div>
+          {section === "review" ? (
+            <div className="drawer-save-controls">
+              <label className="drawer-verify">
+                <input
+                  type="checkbox"
+                  checked={verified}
+                  disabled={busy}
+                  onChange={(e) => setVerified(e.target.checked)}
+                />
+                我已核對來源畫面與上述資料
+              </label>
+              <button
+                className="button primary"
+                disabled={busy}
+                onClick={() => {
+                  void (async () => {
+                    const updated = await onSave({
+                      fields: changes,
+                      verified,
+                      evolutionSilhouette,
+                      maxStatus,
+                      dismissCandidates: dismiss,
+                    }, false);
+                    if (!updated) return;
+                    if (updated.analysis && updated.analysis.category !== "review") {
+                      onClose();
+                      return;
+                    }
+                    const missing = reviewPromptsFor(updated);
+                    setSaveReviewReasons(missing.length ? missing : [
+                      "資料仍無法可靠分類，請確認物種、CP、HP、IV 與特殊狀態",
+                    ]);
+                    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                  })();
+                }}
+              >
+                {busy ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <Check size={15} />
+                )}
+                儲存並重新評估
+              </button>
+            </div>
+          ) : (
+            <button
+              className="button secondary"
+              onClick={() => setSection("review")}
+            >
+              <ArrowLeft size={14} />
+              回到核對
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
