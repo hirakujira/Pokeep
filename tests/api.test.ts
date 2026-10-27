@@ -102,6 +102,22 @@ test("內部錯誤回 500 且不外洩細節，預期錯誤仍回 400", async ()
   assert.equal(phone.status, 400);
   assert.equal((await phone.json()).error, "畫面已改變，請重試");
 });
+test("CSV 匯出可處理缺少理由的舊版分析資料", async () => {
+  store.put(
+    "pokemon",
+    "legacy-analysis",
+    record("legacy-analysis", {}, {
+      analysis: { category: "transfer" } as unknown as Pokemon["analysis"],
+    }),
+  );
+  try {
+    const response = await request("export?format=csv");
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /"legacy-analysis".*"transfer"/);
+  } finally {
+    store.remove("pokemon", "legacy-analysis");
+  }
+});
 test("正式Next服務內部hostname與瀏覽器不同時，同源寫入仍可儲存", async () => {
   const req = new NextRequest("http://localhost:3000/api/iphone/prepare", {
     method: "POST",

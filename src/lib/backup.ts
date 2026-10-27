@@ -395,7 +395,7 @@ export function exportCsv(records = listPokemon()) {
       String(f.ivDef ?? ""),
       String(f.ivSta ?? ""),
       p.analysis?.category || "review",
-      p.analysis?.reasons.join("；") || "",
+      p.analysis?.reasons?.join("；") || "",
       p.owned ? "是" : "否",
     ]);
   }
