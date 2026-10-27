@@ -232,6 +232,26 @@ test("保留理由明示 PvP、團體戰，且屬性使用中文", () => {
   assert.equal(typeName("psychic"), "超能力");
 });
 
+test("入選的 PvP 與團體戰名額記在分析裡，供組隊使用", () => {
+  const snapshot = fixture();
+  snapshot.version = "battle-slots-fixture";
+  snapshot.rankings["10000"] = [{ speciesId: "caterpie", score: 100, moves: [] }];
+  snapshot.moves.STRUGGLE.type = "bug";
+  const weaker = record("other", {
+    ivAtk: 10,
+    ivDef: 10,
+    ivSta: 10,
+    cp: combatPower(snapshot.species.caterpie, [10, 10, 10], 15, snapshot),
+    hp: hitPoints(snapshot.species.caterpie, 10, 15, snapshot),
+  });
+  const [picked, other] = evaluateCollection(
+    [record("picked"), weaker], snapshot, { ...settings, raidSlots: 1 },
+  );
+  assert.deepEqual(picked.analysis?.battleSlots.leagues.map((l) => l.league), [10000]);
+  assert.deepEqual(picked.analysis?.battleSlots.raids.map((r) => r.type), ["bug"]);
+  assert.equal(other.analysis?.category, "transfer");
+  assert.deepEqual(other.analysis?.battleSlots, { leagues: [], raids: [] });
+});
 test("保留理由依優先度排序，列表第一條顯示最重要的理由", () => {
   const snapshot = fixture();
   snapshot.version = "keep-reason-order-fixture";

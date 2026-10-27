@@ -1838,6 +1838,86 @@ body:has(.drawer-backdrop) .toast.toast-stacked {
   font-weight: 500;
 }
 
+/* ---------- Teams ---------- */
+.team-caption {
+  padding: 12px 20px 0;
+}
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 12px 20px 18px;
+}
+.team-card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.team-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.team-card-head > strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+.team-members {
+  list-style: none;
+}
+.team-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.team-member:hover {
+  background: var(--surface-2);
+}
+.team-member .pokemon-token {
+  width: 36px;
+  height: 36px;
+}
+.team-member-name {
+  flex: 1;
+  min-width: 0;
+}
+.team-member-name strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+.team-member-name small,
+.team-metric small {
+  display: block;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.team-metric {
+  flex: none;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-align: right;
+}
+.team-bench {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.team-bench summary {
+  cursor: pointer;
+  padding: 4px;
+  font-weight: 600;
+}
+
 /* ---------- Move training ---------- */
 .tm-panel {
   margin-bottom: 16px;

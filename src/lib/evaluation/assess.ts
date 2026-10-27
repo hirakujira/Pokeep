@@ -29,6 +29,7 @@ function baseAnalysis(p: Pokemon, snapshot: Snapshot | null): Analysis {
     evolutionCandy: null,
     purification: null,
     moveTraining: [],
+    battleSlots: { leagues: [], raids: [] },
     comparedWith: [],
     snapshot: snapshot?.version || null,
     evaluatedAt: now(),

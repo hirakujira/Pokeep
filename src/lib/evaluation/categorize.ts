@@ -293,6 +293,10 @@ export function categorize(p: Pokemon, d: CollectionDecisions) {
     picks = d.selected.get(p.id) || [];
   const hasCombat = picks.some((x) => !x.reason.includes("收藏"));
   a.comparedWith = comparedWith(p.id, picks, d);
+  a.battleSlots = {
+    leagues: picks.flatMap((x) => (x.league ? [x.league] : [])),
+    raids: picks.flatMap((x) => (x.raid ? [x.raid] : [])),
+  };
   if (!p.owned) {
     a.category = "collect";
     a.reasons = ["已標記離開收藏庫，不參與現有個體比較"];

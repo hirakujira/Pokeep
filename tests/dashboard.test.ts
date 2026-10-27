@@ -6,17 +6,20 @@ import {
   emptyFields,
   type Analysis,
   type Fields,
+  type LeagueResult,
   type MoveTrainingAdvice,
   type MoveTrainingStep,
   type Pokemon,
   type RaidResult,
 } from "../src/lib/types";
+import { pvpTeams, raidTeams } from "../src/lib/teams";
 import { record } from "./fixtures";
 
 const { api } = await import("../src/components/dashboard/api");
 const { trackPending } = await import("../src/components/dashboard/track-pending");
 const { DrawerAnalysis } = await import("../src/components/dashboard/drawer-analysis");
 const { MoveTrainingPanel } = await import("../src/components/dashboard/move-training");
+const { TeamsPanel } = await import("../src/components/dashboard/teams");
 
 test("API 回傳非 JSON 時顯示可理解的錯誤", async () => {
   const originalFetch = globalThis.fetch;
@@ -81,6 +84,7 @@ test("渲染團體戰比較時依排名顯示，但不改動已存的分析資�
     evolutionCandy: null,
     purification: null,
     moveTraining: [],
+    battleSlots: { leagues: [], raids: [] },
     comparedWith: [],
     snapshot: null,
     evaluatedAt: "2026-10-24T00:00:00.000Z",
@@ -106,6 +110,7 @@ const analysisWith = (patch: Partial<Analysis>): Analysis => ({
   evolutionCandy: null,
   purification: null,
   moveTraining: [],
+  battleSlots: { leagues: [], raids: [] },
   comparedWith: [],
   snapshot: null,
   evaluatedAt: "2026-10-24T00:00:00.000Z",
@@ -419,4 +424,66 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
     [true, ["none"], "一般個體（暗影或淨化個體無法極巨化）"]);
   assert.deepEqual(max(render("pidgey", { shadow: false, purified: true }, { maxStatus: "dynamax" })),
     [false, ["", "none", "dynamax"], "極巨化"]);
+});
+
+test("隊伍依入選類型分組：PvP 取環境排名前 3 個不同物種，團體戰可重複且前 6 隻為主力", () => {
+  const league = (speciesId: string, metaRank: number) =>
+    ({ league: 10000, speciesId, name: speciesId, metaRank, ivRank: 1 }) as LeagueResult;
+  const raid = (speciesId: string, type: string, dps: number) =>
+    ({ speciesId, name: speciesId, type, dps }) as RaidResult;
+  const holder = (
+    id: string,
+    speciesId: string,
+    leagues: LeagueResult[],
+    raids: RaidResult[] = [],
+    category: Analysis["category"] = "invest",
+  ) => record(id, { speciesId }, { analysis: analysisWith({ category, battleSlots: { leagues, raids } }) });
+  const records = [
+    holder("mewtwo", "mewtwo", [league("mewtwo", 3)], [raid("mewtwo", "psychic", 20)]),
+    holder("mewtwo-shadow", "mewtwo_shadow", [league("mewtwo_shadow", 1)], [raid("mewtwo_shadow", "psychic", 24)]),
+    holder("eevee", "eevee", [league("umbreon", 2), league("sylveon", 4)]),
+    holder("snorlax", "snorlax", [league("snorlax", 5)]),
+    holder("dialga", "dialga", [league("dialga", 6)]),
+    ...[19, 18, 17, 16, 15].map((dps, i) =>
+      holder(`mewtwo-${i}`, "mewtwo", [], [raid("mewtwo", "psychic", dps)])),
+    holder("machamp", "machamp", [], [raid("machamp", "fighting", 18)]),
+  ];
+  const dex: Record<string, number> = {
+    mewtwo: 150, mewtwo_shadow: 150, eevee: 133, umbreon: 197, sylveon: 700,
+    snorlax: 143, dialga: 483, machamp: 68, lugia: 249,
+  };
+  const [great, ultra, master] = pvpTeams(records, (id) => dex[id]);
+  assert.deepEqual([great.starters, ultra.starters], [[], []]);
+  assert.deepEqual(
+    master.starters.map((m) => `${m.pokemon.id}:${m.slot.speciesId}`),
+    ["mewtwo-shadow:mewtwo_shadow", "eevee:umbreon", "snorlax:snorlax"],
+  );
+  assert.deepEqual(
+    master.bench.map((m) => [m.slot.speciesId, m.blockedBy]),
+    [["mewtwo", "species"], ["sylveon", "pokemon"], ["dialga", null]],
+  );
+  const raidTeam = raidTeams(records);
+  assert.deepEqual(raidTeam.map((t) => t.type), ["fighting", "psychic"]);
+  assert.deepEqual(
+    raidTeam[1].starters.map((m) => m.pokemon.id),
+    ["mewtwo-shadow", "mewtwo", "mewtwo-0", "mewtwo-1", "mewtwo-2", "mewtwo-3"],
+  );
+  assert.deepEqual(raidTeam[1].bench.map((m) => m.pokemon.id), ["mewtwo-4"]);
+
+  const html = renderToString(React.createElement(TeamsPanel, {
+    records: [...records, holder("unverified", "lugia", [league("lugia", 0)], [], "review")],
+    catalog: {
+      species: Object.entries(dex).map(([id, n]) => ({ id, dex: n, name: id, types: [], form: null })),
+      moves: [],
+      visualForms: {},
+    },
+    onSelect: () => {},
+  }));
+  assert.equal(html.split("沒有入選的寶可夢").length - 1, 2);
+  assert.ok(html.includes("候補 3 隻"));
+  assert.ok(html.includes("同物種已在隊伍"));
+  assert.ok(html.includes("這隻已以其他進化型入隊"));
+  assert.ok(html.includes("二軍 1 隻"));
+  assert.equal(html.split("需進化").length - 1, 2);
+  assert.ok(!html.includes("/api/sprites/lugia"));
 });

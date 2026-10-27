@@ -69,3 +69,22 @@ export function PokemonSprite({ pokemon }: { pokemon: Pokemon }) {
     </span>
   );
 }
+
+// Panels using this mount only after a client-side filter click, never during
+// SSR, so reading storage in the first render cannot cause a hydration mismatch.
+export function useSavedOpen(key: string) {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(key) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const toggle = () => {
+    setOpen(!open);
+    try {
+      localStorage.setItem(key, open ? "closed" : "open");
+    } catch { /* Fall back to the default next time. */ }
+  };
+  return [open, toggle] as const;
+}

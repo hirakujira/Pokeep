@@ -12,6 +12,7 @@ import { ResultsPanel } from "./results-panel";
 import { SettingsView } from "./settings-view";
 import { Sidebar } from "./sidebar";
 import { StatsGrid } from "./stats-grid";
+import { TeamsPanel } from "./teams";
 import {
   BatchProgressPanel,
   PausedBatchesPanel,
@@ -161,6 +162,9 @@ export default function Dashboard() {
                   busy={busy}
                   actions={transferActions}
                 />
+              )}
+              {filter === "invest" && (
+                <TeamsPanel records={living} catalog={catalog} onSelect={setSelected} />
               )}
               {filter === "invest" && (
                 <MoveTrainingPanel

@@ -10,7 +10,7 @@ import {
 } from "@/lib/types";
 import { moveName } from "@/lib/move-names";
 import { localizeSpeciesName } from "@/lib/species-names";
-import { PokemonSprite } from "./ui";
+import { PokemonSprite, useSavedOpen } from "./ui";
 
 type MoveNames = Record<string, string>;
 type Entry = { pokemon: Pokemon; advice: MoveTrainingAdvice; step: MoveTrainingStep };
@@ -234,17 +234,6 @@ function TmTabPanel({
   );
 }
 
-const openKey = "pokeep-move-training-open";
-// The panel mounts only after a client-side filter click, never during SSR,
-// so reading storage in the first render cannot cause a hydration mismatch.
-function savedOpen() {
-  try {
-    return localStorage.getItem(openKey) !== "closed";
-  } catch {
-    return true;
-  }
-}
-
 export function MoveTrainingPanel({
   records,
   moveNames,
@@ -254,15 +243,9 @@ export function MoveTrainingPanel({
   moveNames: MoveNames;
   onSelect: Select;
 }) {
-  const [open, setOpen] = useState(savedOpen);
+  const [open, toggle] = useSavedOpen("pokeep-move-training-open");
   const [tab, setTab] = useState<MoveTrainingTm>("fast");
   const baseId = useId();
-  const toggle = () => {
-    setOpen(!open);
-    try {
-      localStorage.setItem(openKey, open ? "closed" : "open");
-    } catch { /* Fall back to the default next time. */ }
-  };
   const active = records.filter(
     (p) => p.owned && p.analysis && p.analysis.category !== "review",
   );

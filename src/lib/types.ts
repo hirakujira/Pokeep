@@ -204,6 +204,8 @@ export type Analysis = {
     cost?: { dust: number; candy: number };
   } | null;
   moveTraining: MoveTrainingAdvice[];
+  /** PvP and raid slots this Pokémon won, the pool teams are built from. */
+  battleSlots: { leagues: LeagueResult[]; raids: RaidResult[] };
   comparedWith: string[];
   snapshot: string | null;
   evaluatedAt: string;
