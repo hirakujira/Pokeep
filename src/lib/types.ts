@@ -253,6 +253,8 @@ export type Species = {
   }[];
   /** True when the species can Mega Evolve or undergo Primal Reversion. */
   mega?: boolean;
+  /** Max forms this species can have; missing when the snapshot predates the Max data. */
+  maxForms?: ("dynamax" | "gigantamax")[];
   thirdMove: { dust: number; candy: number } | null;
   form: string | null;
 };

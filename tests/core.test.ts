@@ -1466,6 +1466,50 @@ test("遊戲資料標記可 Mega 進化或原始回歸的物種", async () => {
   assert.equal(result.staraptor_mega, undefined);
 });
 
+test("遊戲資料依極巨對戰模型標記可極巨化與超極巨化的物種", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [],
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("charmander", 4), base("charizard", 6), base("charizard_shadow", 6),
+    base("meowth_galarian", 52), base("urshifu_single_strike", 892), base("zacian_hero", 888),
+  ];
+  const extended = (dex: number, name: string, modes: string[]) => ({
+    templateId: `EXTENDED_V${String(dex).padStart(4, "0")}_POKEMON_${name}`,
+    data: { pokemonExtendedSettings: { breadOverrides: modes.map((breadMode) => ({ breadMode })) } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    extended(4, "CHARMANDER_NORMAL", ["BREAD_MODE"]),
+    extended(6, "CHARIZARD", ["BREAD_MODE", "BREAD_DOUGH_MODE"]),
+    extended(52, "MEOWTH_GALARIAN", ["BREAD_MODE"]),
+    extended(892, "URSHIFU_SINGLE_STRIKE", ["BREAD_MODE", "BREAD_DOUGH_MODE_2"]),
+    { templateId: "V0888_POKEMON_ZACIAN_HERO", data: { pokemonSettings: { formChange: [
+      { formChangeBonusAttributes: [{ breadMode: "BREAD_SPECIAL_MODE" }] },
+    ] } } },
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { species: result } = normalizeData({ pokemon, moves: [] }, gm, "", ranks, "test-version");
+  assert.deepEqual(
+    ["charmander", "charizard", "charizard_shadow", "meowth_galarian", "urshifu_single_strike", "zacian_hero", "fixture_0"]
+      .map((id) => result[id].maxForms),
+    [["dynamax"], ["dynamax", "gigantamax"], ["dynamax", "gigantamax"], ["dynamax"],
+      ["dynamax", "gigantamax"], ["dynamax"], []],
+  );
+  const { species: old } = normalizeData({ pokemon, moves: [] }, gm.slice(0, 2), "", ranks, "test-version");
+  assert.equal(old.charizard.maxForms, undefined);
+});
+
 test("遊戲資料收集外觀形態，略過服裝、戰鬥中形態與已有物種 ID 的形態", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number) => ({

@@ -215,6 +215,31 @@ export function normalizeData(
         norm(row.templateId.replace(/^V\d+_POKEMON_/, "")),
         row.data.pokemonSettings,
       );
+  // Max Battles are "bread" in the Game Master: a species gets Max models only
+  // once it can Dynamax, and the "dough" models are its Gigantamax form.
+  // Zacian and Zamazenta carry Max moves through their form change instead.
+  const maxModes = new Map<string, Set<string>>();
+  const addMaxMode = (key: string, mode: unknown) => {
+    if (typeof mode !== "string") return;
+    maxModes.set(key, (maxModes.get(key) ?? new Set<string>()).add(mode));
+  };
+  for (const row of gm) {
+    const overrides = row.data?.pokemonExtendedSettings?.breadOverrides;
+    if (Array.isArray(overrides))
+      for (const o of overrides)
+        addMaxMode(norm(row.templateId.replace(/^EXTENDED_V\d+_POKEMON_/, "")), o.breadMode);
+    if (row.data?.pokemonSettings?.formChange?.some((c: Raw) => c.requiredBreadMoves ||
+        c.formChangeBonusAttributes?.some((a: Raw) => a.breadMode || a.clearBreadMode)))
+      addMaxMode(norm(row.templateId.replace(/^V\d+_POKEMON_/, "")), "BREAD_SPECIAL_MODE");
+  }
+  const maxForms = (id: string) => {
+    if (!maxModes.size) return undefined;
+    const modes = [...(maxModes.get(norm(id)) ?? [])];
+    return [
+      ...(modes.length ? ["dynamax" as const] : []),
+      ...(modes.some((m) => m.startsWith("BREAD_DOUGH_MODE")) ? ["gigantamax" as const] : []),
+    ];
+  };
   const species: Snapshot["species"] = {},
     names: Record<string, string> = {},
     moveNames: Record<string, string> = {};
@@ -319,6 +344,7 @@ export function normalizeData(
       evolutions,
       mega: pvpMegaBases.has(baseId) ||
         Boolean(g?.tempEvoOverrides?.some((o: Raw) => o.tempEvoId)),
+      maxForms: maxForms(baseId),
       thirdMove: g?.thirdMove
         ? {
             dust: g.thirdMove.stardustToUnlock,

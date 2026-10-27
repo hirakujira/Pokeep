@@ -31,6 +31,8 @@ export type Catalog = {
     evolves?: boolean;
     /** True when the species can Mega Evolve or undergo Primal Reversion. */
     mega?: boolean;
+    /** Max forms the species can have; missing when not known. */
+    maxForms?: ("dynamax" | "gigantamax")[];
   }[];
   moves: { id: string; name: string }[];
   visualForms: Record<string, VisualForm[]>;

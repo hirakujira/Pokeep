@@ -16,6 +16,7 @@ export function speciesCatalog() {
       genders: s.genders,
       evolves: s.evolutions.length > 0,
       mega: s.mega,
+      maxForms: s.maxForms,
     })),
     visualForms: snapshot?.visualForms ?? {},
     moves: Object.values(snapshot?.moves || {}).map((m) => ({

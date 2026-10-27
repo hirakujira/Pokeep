@@ -152,6 +152,15 @@ export function withFixedValues(f: Fields, species: Map<string, CatalogSpecies>)
   };
 }
 
+export type MaxStatus = "none" | "dynamax" | "gigantamax";
+export const maxStatuses: MaxStatus[] = ["none", "dynamax", "gigantamax"];
+
+/** Max states the species allows; undefined while the species or its Max data is unknown. */
+export function maxLimits(speciesId: string | null, species: Map<string, CatalogSpecies>) {
+  const forms = speciesId ? species.get(speciesId)?.maxForms : undefined;
+  return forms && (["none", ...forms] as MaxStatus[]);
+}
+
 /** True when no evolve button can show: no evolution, Mega Evolution or Primal Reversion. */
 export function lacksEvolutionButton(speciesId: string | null, species: Map<string, CatalogSpecies>) {
   const s = speciesId ? species.get(speciesId) : undefined;

@@ -296,11 +296,11 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   const catalog = {
     ...formCatalog,
     species: [
-      { id: "pidgey", dex: 16, name: "波波", types: ["normal"], form: null, genders: ["male" as const, "female" as const], evolves: true },
-      { id: "tauros", dex: 128, name: "肯泰羅", types: ["normal"], form: null, genders: ["male" as const], evolves: false },
+      { id: "pidgey", dex: 16, name: "波波", types: ["normal"], form: null, genders: ["male" as const, "female" as const], evolves: true, maxForms: ["dynamax" as const] },
+      { id: "tauros", dex: 128, name: "肯泰羅", types: ["normal"], form: null, genders: ["male" as const], evolves: false, maxForms: [] },
       { id: "magnemite", dex: 81, name: "小磁怪", types: ["electric"], form: null, genders: ["genderless" as const], evolves: true },
       { id: "magnemite_shadow", dex: 81, name: "小磁怪（暗影）", types: ["electric"], form: null, genders: ["genderless" as const], evolves: true },
-      { id: "kangaskhan", dex: 115, name: "袋獸", types: ["normal"], form: null, genders: ["female" as const], evolves: false, mega: true },
+      { id: "kangaskhan", dex: 115, name: "袋獸", types: ["normal"], form: null, genders: ["female" as const], evolves: false, mega: true, maxForms: ["dynamax" as const, "gigantamax" as const] },
     ],
   };
   const byId = new Map(catalog.species.map((s) => [s.id, s]));
@@ -385,4 +385,16 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   assert.deepEqual(button(render("kangaskhan")), [false, "未能確認"]);
   assert.deepEqual(button(render("pidgey", {}, { evolutionSilhouette: "unavailable" })), [false, "無法進化（沒有進化按鈕）"]);
   assert.deepEqual(button(render("unknown_species")), [false, "未能確認"]);
+
+  const max = (html: string) => {
+    const field = select(html, "極巨化狀態");
+    return [/^<select disabled="">/.test(field), [...field.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]),
+      field.match(/<option[^>]* selected=""[^>]*>([^<]*)</)?.[1]];
+  };
+  const unknownMax = { maxStatus: null };
+  assert.deepEqual(max(render("tauros", {}, unknownMax)), [true, ["none"], "一般個體（此物種未開放極巨化）"]);
+  assert.deepEqual(max(render("tauros", {}, { maxStatus: "dynamax" })), [false, ["", "none", "dynamax"], "極巨化"]);
+  assert.deepEqual(max(render("pidgey", {}, unknownMax)), [false, ["", "none", "dynamax"], "未能確認"]);
+  assert.deepEqual(max(render("kangaskhan", {}, unknownMax)), [false, ["", "none", "dynamax", "gigantamax"], "未能確認"]);
+  assert.deepEqual(max(render("magnemite", {}, unknownMax)), [false, ["", "none", "dynamax", "gigantamax"], "未能確認"]);
 });

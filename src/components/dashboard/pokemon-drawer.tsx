@@ -27,6 +27,8 @@ import {
   formChoice,
   keptFormKey,
   lacksEvolutionButton,
+  maxLimits,
+  maxStatuses,
   restrictedChoice,
   shadowFields,
   shadowState,
@@ -37,6 +39,7 @@ import {
   unknownForm,
   withFixedValues,
   type FormOption,
+  type MaxStatus,
   type ShadowState,
 } from "./species-options";
 import type { Catalog } from "./types";
@@ -55,6 +58,12 @@ const shadowLabels: Record<string, string> = {
   purified: "暗影 - 已淨化",
 };
 const shadowKeys: (keyof Fields)[] = ["shadow", "purified"];
+const maxLabels: Record<string, string> = {
+  "": "未能確認",
+  none: "一般個體",
+  dynamax: "極巨化",
+  gigantamax: "超極巨化",
+};
 
 export function PokemonDrawer({
   pokemon: p,
@@ -146,6 +155,7 @@ export function PokemonDrawer({
   // button state other than "unavailable" stays editable so the conflict can be fixed.
   const noEvolutionButton = lacksEvolutionButton(fields.speciesId, speciesById) &&
     (evolutionSilhouette === null || evolutionSilhouette === "unavailable");
+  const maxChoice = restrictedChoice(maxStatuses, maxLimits(fields.speciesId, speciesById), maxStatus ?? null);
   const changes = Object.fromEntries(
     (Object.keys(shown) as (keyof Fields)[])
       .filter((key) => shown[key] !== effective(p)[key])
@@ -559,16 +569,17 @@ export function PokemonDrawer({
                   <label className="edit-field">
                     <span>極巨化狀態</span>
                     <select
-                      value={maxStatus ?? ""}
+                      value={maxChoice.value ?? ""}
+                      disabled={maxChoice.fixed}
                       onChange={(event) => setMaxStatus(
-                        event.target.value === "" ? null :
-                        event.target.value as "none" | "dynamax" | "gigantamax",
+                        event.target.value === "" ? null : event.target.value as MaxStatus,
                       )}
                     >
-                      <option value="">未能確認</option>
-                      <option value="none">一般個體</option>
-                      <option value="dynamax">極巨化</option>
-                      <option value="gigantamax">超極巨化</option>
+                      {maxChoice.options.map((value) => (
+                        <option key={value ?? ""} value={value ?? ""}>
+                          {value === "none" && maxChoice.fixed ? "一般個體（此物種未開放極巨化）" : maxLabels[value ?? ""]}
+                        </option>
+                      ))}
                     </select>
                     <small>依能力頁上的極巨化徽章判定；可在此人工修正。</small>
                   </label>
@@ -673,7 +684,7 @@ export function PokemonDrawer({
                       fields: changes,
                       verified,
                       evolutionSilhouette,
-                      maxStatus,
+                      maxStatus: maxChoice.value,
                       dismissCandidates: dismiss,
                     }, false);
                     if (!updated) return;
