@@ -161,7 +161,7 @@ export function DrawerAnalysis({
             固定防禦 150、中性傷害、同等級比較的簡化循環
             DPS；不是指定頭目排名。
           </p>
-          {a.raids
+          {[...a.raids]
             .sort((x, y) => x.rank - y.rank)
             .map((r) => (
               <div
