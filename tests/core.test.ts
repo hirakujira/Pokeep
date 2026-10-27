@@ -991,6 +991,21 @@ test("確認色違全部保留", () => {
     2,
   );
 });
+test("已放生個體不佔 PvP 名額", () => {
+  const s = fixture();
+  s.rankings["1500"] = [{ speciesId: "caterpie", score: 100, moves: [] }];
+  const best = record("best", {
+    ivAtk: 15,
+    ivDef: 15,
+    ivSta: 15,
+    cp: combatPower(s.species.caterpie, [15, 15, 15], 15, s),
+    hp: hitPoints(s.species.caterpie, 15, 15, s),
+  });
+  const kept = record("kept");
+  assert.equal(evaluateCollection([best, kept], s, settings)[1].analysis?.category, "transfer");
+  const rows = evaluateCollection([{ ...best, owned: false }, kept], s, settings);
+  assert.equal(rows[1].analysis?.category, "invest");
+});
 test("開招成本取遊戲資料：暗影 1.2 倍、淨化 0.8 倍，不用畫面讀值", () => {
   const s = fixture();
   s.species.caterpie_shadow = species("caterpie_shadow", { tags: ["shadow"] });
