@@ -34,7 +34,7 @@ const { shinyConsensus, shinyReferenceSource, upperAppearanceImage } = await imp
 const { specialVisualConsensus, applySpecialVisualVerdict } = await import("../src/lib/special-visual-review");
 const { caughtDateBadge } = await import("../src/lib/shiny-timeline");
 const { genderlessByDex, resolveSpecies } = await import("../src/lib/game-data");
-const { runScan, analyzeScan, captureOne, applyStoredNormalShadowReviews, applyStoredShinyReviews } =
+const { runScan, analyzeScan, analyzeOne, captureOne, applyStoredNormalShadowReviews, applyStoredShinyReviews } =
   await import("../src/lib/iphone-scan");
 after(() => {
   store.db().close();
@@ -901,6 +901,85 @@ test("已完成截圖的解析可離線續跑，缺少截圖檢查點不得完�
     expected: 1,
   });
   await assert.rejects(() => analyzeScan(base.id), /檢查點不完整|數量與盒子總數不符/);
+});
+
+test("疑似重複的警告只記在寶可夢紀錄，不寫進評價截圖觀察", async () => {
+  const warning = "疑似與既有個體重複，請人工核對";
+  const stamp = new Date().toISOString();
+  const scanId = "duplicate-warning";
+  store.put("scans", scanId, {
+    id: scanId,
+    scope: "results",
+    status: "running",
+    stage: "解析中",
+    createdAt: stamp,
+    updatedAt: stamp,
+    scanned: 1,
+    phase: "capture",
+    analyzed: 0,
+    review: 0,
+    expected: 1,
+    sort: null,
+    currentFrame: null,
+    lastFingerprint: null,
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    error: null,
+    checkpointRequired: false,
+    iphoneUseVersion: null,
+  } satisfies Scan);
+  store.put("pokemon", "duplicate-existing", record("duplicate-existing"));
+  const screen = { fields: record("duplicate-screen").fields, issues: [], clear: true };
+  const item: ScanItem = {
+    id: "duplicate-item",
+    scanId,
+    position: 0,
+    frame: "duplicate-0.jpg",
+    movesFrame: "duplicate-1.jpg",
+    appraisalFrame: "duplicate-2.jpg",
+    measuredIV: [14, 12, 13],
+    fingerprint: "duplicate",
+    pokemonId: null,
+    fields: null,
+    issues: [],
+    protectionClear: true,
+    capturedAt: stamp,
+  };
+  const prepared = Promise.resolve({
+    recognized: {
+      top: screen,
+      moves: screen,
+      appraisal: screen,
+      visual: {
+        detailClear: true,
+        hasUnexpectedOverlay: false,
+        costumeAbsentClear: true,
+        warningVisible: false,
+        evolutionSilhouette: null,
+        maxStatus: null,
+      },
+    },
+    measuredAgain: { values: [14, 12, 13], rows: [0, 0, 0], left: 0, right: 0, confidence: 1 },
+  });
+  try {
+    await analyzeOne(scanId, item, prepared);
+    const created = store
+      .all<import("../src/lib/types").Pokemon>("pokemon")
+      .find((p) => p.jobId === scanId);
+    assert.ok(created?.issues.includes(warning));
+    assert.ok(created?.candidates.includes("duplicate-existing"));
+    const appraisal = store.get<import("../src/lib/types").Observation>(
+      "observations",
+      `${scanId}-0-2`,
+    );
+    assert.ok(appraisal);
+    assert.ok(!appraisal.issues.includes(warning));
+  } finally {
+    for (const p of store.all<import("../src/lib/types").Pokemon>("pokemon"))
+      if (p.jobId === scanId || p.id === "duplicate-existing") store.remove("pokemon", p.id);
+    for (const index of [0, 1, 2]) store.remove("observations", `${scanId}-0-${index}`);
+    store.remove("scan_items", item.id);
+    store.remove("scans", scanId);
+  }
 });
 
 test("逐隻截圖只使用固定導航與本機 IV 量測，不呼叫頁面辨識", async () => {

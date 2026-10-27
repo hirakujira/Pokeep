@@ -397,8 +397,6 @@ function saveNewRecord(
 ) {
   const evolutionSilhouette = visual.evolutionSilhouette;
   const maxStatus = visual.maxStatus;
-  // Observation index 2 shares `issues`, so the duplicate warning below is
-  // recorded on the appraisal observation as well.
   const observations = scanObservations(
     scanId,
     item,
@@ -409,7 +407,9 @@ function saveNewRecord(
   const prior = listPokemon().filter(
     (p) => p.owned && matching(effective(p), fields) !== "different",
   );
-  if (prior.length) issues.push("疑似與既有個體重複，請人工核對");
+  const recordIssues = prior.length
+    ? [...issues, "疑似與既有個體重複，請人工核對"]
+    : issues;
   const pokemon: Pokemon = {
     id: id(),
     jobId: scanId,
@@ -427,7 +427,7 @@ function saveNewRecord(
       capturedAt: item.capturedAt,
       scanItemId: item.id,
     })),
-    issues,
+    issues: recordIssues,
     candidates: prior.map((p) => p.id),
     verified: complete && !prior.length,
     verification: complete && !prior.length ? "automatic" : null,
@@ -449,7 +449,7 @@ function saveNewRecord(
       ...item,
       pokemonId: pokemon.id,
       fields,
-      issues,
+      issues: recordIssues,
       protectionClear,
       evolutionSilhouette,
       maxStatus,
