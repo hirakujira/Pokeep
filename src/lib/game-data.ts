@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { dataDir, getSnapshot, saveSnapshot } from "./store";
 import type { Fields, Gender, Snapshot, Species, VisualForm } from "./types";
-import { moveName } from "./move-names";
+import { localizedMoveAliases, moveName } from "./move-names";
 
 const urls: Record<string, string> = {
   "pvpoke.json":
@@ -563,6 +563,20 @@ export function resolveSpecies(
     ),
   );
   return compatible.length === 1 ? compatible[0] : null;
+}
+/**
+ * Screenshots show only a move's name, and some names belong to several moves
+ * (Blastoise's own Water Gun, the typed Weather Balls); the species' pool picks
+ * among those. An unresolved name is kept as read.
+ */
+export function resolveMoveId(snapshot: Snapshot, value: string, species?: Species | null) {
+  const id = localizedMoveAliases[value] ?? value;
+  if (snapshot.moves[id]) return id;
+  const named = Object.values(snapshot.moves).filter((m) => m.name === value).map((m) => m.id);
+  if (named.length === 1) return named[0];
+  const pool = new Set([...(species?.fast ?? []), ...(species?.charged ?? []), ...(species?.elite ?? [])]);
+  const inPool = named.filter((m) => pool.has(m));
+  return inPool.length === 1 ? inPool[0] : value;
 }
 export function publicSnapshot(snapshot = getSnapshot()) {
   return snapshot

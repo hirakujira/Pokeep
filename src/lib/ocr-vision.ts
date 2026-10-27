@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import sharp from "sharp";
 import { z } from "zod";
-import { resolveSpecies } from "./game-data";
+import { resolveMoveId, resolveSpecies } from "./game-data";
 import { formatOcrLines, readLocalOcr } from "./local-ocr";
 import { openAiBaseURL, openAiClient } from "./openai-config";
 import { getRuntimeConfig } from "./runtime-config";
@@ -183,14 +183,9 @@ export async function recognizeScanWithOcr(
   const moves = { ...emptyFields(), ...parsed.moves };
   const appraisal = { ...emptyFields(), ...parsed.appraisal };
   if (snapshot) {
-    for (const key of ["fastMove", "chargeMove", "chargeMove2"] as const) {
-      const value = moves[key];
-      if (!value) continue;
-      const matches = Object.values(snapshot.moves).filter(
-        (move) => move.name === value || move.id === value,
-      );
-      if (matches.length === 1) moves[key] = matches[0].id;
-    }
+    const moveKeys = ["fastMove", "chargeMove", "chargeMove2"] as const;
+    for (const key of moveKeys)
+      if (moves[key]) moves[key] = resolveMoveId(snapshot, moves[key]);
     const species = resolveSpecies(
       snapshot,
       top.name,
@@ -201,6 +196,8 @@ export async function recognizeScanWithOcr(
     );
     if (species) top.speciesId = species.id;
     else parsed.issues.push("物種／形態無法唯一對應，請人工核對");
+    for (const key of moveKeys)
+      if (moves[key]) moves[key] = resolveMoveId(snapshot, moves[key], species);
   }
   if (top.speciesId)
     top.costume = canonicalCostume(costumes.get(costumeSpeciesKey(top.speciesId)), top.costume);

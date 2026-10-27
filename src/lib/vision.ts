@@ -6,7 +6,7 @@ import path from "node:path";
 import { z } from "zod";
 import { dataDir, get, put } from "./store";
 import { fieldsSchema, type Fields, type Snapshot } from "./types";
-import { resolveSpecies } from "./game-data";
+import { resolveMoveId, resolveSpecies } from "./game-data";
 import { openAiBaseURL, openAiClient } from "./openai-config";
 import { getRuntimeConfig } from "./runtime-config";
 
@@ -96,11 +96,7 @@ export async function recognize(
         else result.issues.push("物種／形態無法唯一對應，請選擇正確物種");
         for (const key of ["fastMove", "chargeMove", "chargeMove2"] as const) {
           const value = result.fields[key];
-          if (!value) continue;
-          const matches = Object.values(snapshot.moves).filter(
-            (m) => m.name === value || m.id === value,
-          );
-          if (matches.length === 1) result.fields[key] = matches[0].id;
+          if (value) result.fields[key] = resolveMoveId(snapshot, value, s);
         }
       }
       put("vision_cache", hash, result);

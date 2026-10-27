@@ -9,14 +9,13 @@ import {
   type Species,
 } from "../types";
 import { now } from "../store";
-import { moveName } from "../move-names";
+import { localizedMoveAliases, moveName } from "../move-names";
 import { localizeForm, speciesCostume } from "../species-names";
 import { collectionForm, visualForm } from "./forms";
 import { combatPower, inferLevels, powerCost, rankIV } from "./stats";
 import { evolutionPaths, type EvolutionPath } from "./evolution";
 import { cycleDps, raidBenchmarks } from "./raid";
 
-export const localizedMoveAliases: Record<string, string> = { "逆鱗": "OUTRAGE" };
 function baseAnalysis(p: Pokemon, snapshot: Snapshot | null): Analysis {
   return {
     category: "review",

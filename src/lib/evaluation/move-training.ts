@@ -7,9 +7,8 @@ import type {
   Snapshot,
   Species,
 } from "../types";
-import { moveName } from "../move-names";
+import { localizedMoveAliases, moveName } from "../move-names";
 import { typeName } from "../type-names";
-import { localizedMoveAliases } from "./assess";
 import { cycleDps } from "./raid";
 
 export type CombatPick = { raid?: RaidResult; league?: LeagueResult };

@@ -1497,6 +1497,23 @@ test("更新資料時列出 Game Master 招式池有、PvPoke 尚未收錄的招
   assert.match(gaps[0], /：maschiff PAYBACK$/);
 });
 
+test("截圖的招式名稱對應多個代號時，依物種招式池選出唯一代號", async () => {
+  const { resolveMoveId } = await import("../src/lib/game-data");
+  const snapshot = fixture();
+  const move = (id: string, name: string) => ({ id, name, type: "water", power: 5, energy: 5, duration: 0.5 });
+  snapshot.moves.WATER_GUN = move("WATER_GUN", "水槍");
+  snapshot.moves.WATER_GUN_FAST_BLASTOISE = move("WATER_GUN_FAST_BLASTOISE", "水槍");
+  snapshot.moves.OUTRAGE = move("OUTRAGE", "逆麟");
+  const squirtle = species("squirtle", { fast: ["WATER_GUN", "TACKLE"] });
+  assert.equal(resolveMoveId(snapshot, "水槍", squirtle), "WATER_GUN");
+  assert.equal(resolveMoveId(snapshot, "水槍"), "水槍");
+  assert.equal(resolveMoveId(snapshot, "水槍", species("both", { fast: ["WATER_GUN", "WATER_GUN_FAST_BLASTOISE"] })), "水槍");
+  assert.equal(resolveMoveId(snapshot, "蟲咬"), "BUG_BITE");
+  assert.equal(resolveMoveId(snapshot, "BUG_BITE"), "BUG_BITE");
+  assert.equal(resolveMoveId(snapshot, "逆鱗"), "OUTRAGE");
+  assert.equal(resolveMoveId(snapshot, "不存在的招式", squirtle), "不存在的招式");
+});
+
 test("PvPoke 招式代號對應到 Game Master 的招式數值", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, moves: Record<string, string[]> = {}) => ({

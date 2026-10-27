@@ -24,6 +24,9 @@ const chineseAliases: Record<string, string> = {
   TECHNO_BLAST_DOUSE: "高科技光炮（水）",
 };
 
+// The GO text bundle spells Outrage 逆麟; screenshots read as the usual 逆鱗.
+export const localizedMoveAliases: Record<string, string> = { "逆鱗": "OUTRAGE" };
+
 const hasChinese = (value: string) => /[\u3400-\u9fff]/u.test(value);
 const compactAliases = Object.fromEntries(
   Object.entries(chineseAliases).map(([id, label]) => [id.replaceAll("_", ""), label]),
