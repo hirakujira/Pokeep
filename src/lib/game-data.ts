@@ -40,13 +40,14 @@ const norm = (s: string) =>
     .replace(/galarian/g, "galar")
     .replace(/hisuian/g, "hisui")
     .replace(/paldean/g, "paldea");
-// PvPoke splits Hidden Power by type and spells a few move IDs differently.
-const moveKey = (id: string) =>
+// PvPoke spells a few Game Master move IDs differently (FUTURE_SIGHT for
+// FUTURESIGHT, TECHNO_BLAST_DOUSE for TECHNO_BLAST_WATER) and models Aegislash's
+// Shield-form fast moves as separate moves.
+const compactMove = (id: string) =>
   id
     .replace(/_FAST$/, "")
     .replace(/^AEGISLASH_CHARGE_/, "")
     .replace(/^TECHNO_BLAST_DOUSE$/, "TECHNO_BLAST_WATER")
-    .replace(/^HIDDEN_POWER_.+/, "HIDDEN_POWER")
     .replace(/_/g, "");
 // PvPoke marks these available, special-case Pokémon as unreleased because
 // ordinary PvP simulations do not cover them. They still belong in the catalog.
@@ -252,6 +253,37 @@ export function normalizeData(
     names: Record<string, string> = {},
     moveNames: Record<string, string> = {},
     poolGaps: [string, string[]][] = [];
+  const moves: Snapshot["moves"] = {};
+  for (const row of gm) {
+    const m = row.data?.moveSettings;
+    const numeric = row.templateId.match(/^V(\d+)_MOVE_(.+)$/);
+    // Newer moves carry a numeric movementId; their template ID still names them.
+    const rawId = typeof m?.movementId === "string" ? m.movementId : numeric?.[2];
+    if (!m || !m.durationMs || !rawId) continue;
+    const moveId = rawId.replace(/_FAST$/, "");
+    const name = numeric ? tr[`move_name_${numeric[1]}`] : null;
+    moveNames[moveId] = moveName(
+      moveId,
+      { [moveId]: name || pvp.moves.find((v: Raw) => v.moveId === moveId)?.name || moveId },
+    );
+    moves[moveId] = {
+      id: moveId,
+      name: moveNames[moveId],
+      type: (m.pokemonType || "").replace("POKEMON_TYPE_", "").toLowerCase(),
+      power: m.power || 0,
+      energy: m.energyDelta || 0,
+      duration: m.durationMs / 1000,
+    };
+  }
+  // The game rolls Hidden Power's type per Pokémon; PvPoke keeps one ID per type.
+  for (const pm of pvp.moves)
+    if (moves.HIDDEN_POWER && pm.moveId.startsWith("HIDDEN_POWER_")) {
+      moveNames[pm.moveId] = moveName(pm.moveId);
+      moves[pm.moveId] = { ...moves.HIDDEN_POWER, id: pm.moveId, name: moveNames[pm.moveId], type: pm.type };
+    }
+  const gmMoveIds = new Map(Object.keys(moves).map((id) => [compactMove(id), id]));
+  const gmMove = (id: string) => (moves[id] ? id : gmMoveIds.get(compactMove(id)) ?? id);
+  const gmMoves = (ids: string[] = []) => [...new Set(ids.map(gmMove))];
   for (const p of pvp.pokemon) {
     if ((p.released === false && !catalogExceptions.has(p.speciesId)) ||
         !p.baseStats || p.tags?.includes("mega"))
@@ -271,18 +303,19 @@ export function normalizeData(
       zh +
       (suffix ? ` ${suffix}` : "") +
       (p.tags?.includes("shadow") ? "（暗影）" : "");
+    const fast = gmMoves(p.fastMoves), charged = gmMoves(p.chargedMoves), elite = gmMoves(p.eliteMoves);
     // The Game Master pool shows a move change before PvPoke picks it up; moves
     // only PvPoke lists are mostly legacy moves the Game Master already dropped.
     if (g && !p.speciesId.endsWith("_shadow")) {
-      const known = new Set(
-        [...(p.fastMoves || []), ...(p.chargedMoves || []), ...(p.eliteMoves || [])].map(moveKey),
-      );
+      const poolKey = (id: string) => compactMove(id.replace(/^HIDDEN_POWER_.+/, "HIDDEN_POWER"));
+      const known = new Set([...fast, ...charged, ...elite].map(poolKey));
       const missing = [
         ...(g.quickMoves || []), ...(g.cinematicMoves || []),
         ...(g.eliteQuickMove || []), ...(g.eliteCinematicMove || []),
-      ].filter((m) => typeof m === "string" && !/^\d+$/.test(m) && !known.has(moveKey(m)));
-      if (missing.length)
-        poolGaps.push([p.speciesId, [...new Set(missing.map((m: string) => m.replace(/_FAST$/, "")))]]);
+      ].filter((m) => typeof m === "string" && !/^\d+$/.test(m))
+        .map((m: string) => m.replace(/_FAST$/, ""))
+        .filter((m: string) => !known.has(poolKey(m)));
+      if (missing.length) poolGaps.push([p.speciesId, [...new Set<string>(missing)]]);
     }
     const branches = g?.evolutionBranch || [],
       used = new Set<Raw>();
@@ -360,9 +393,9 @@ export function normalizeData(
       atk: p.baseStats.atk,
       def: p.baseStats.def,
       sta: p.baseStats.hp,
-      fast: p.fastMoves || [],
-      charged: p.chargedMoves || [],
-      elite: p.eliteMoves || [],
+      fast,
+      charged,
+      elite,
       tags: [...new Set(tags)] as string[],
       evolutions,
       mega: pvpMegaBases.has(baseId) ||
@@ -386,26 +419,6 @@ export function normalizeData(
   }
   addCatalogForms(species);
   for (const [id, entry] of Object.entries(species)) names[id] = entry.name;
-  const moves: Snapshot["moves"] = {};
-  for (const row of gm) {
-    const m = row.data?.moveSettings;
-    if (!m || !m.durationMs || typeof m.movementId !== "string") continue;
-    const moveId = m.movementId.replace(/_FAST$/, ""),
-      numeric = row.templateId.match(/^V(\d+)_MOVE_/);
-    const name = numeric ? tr[`move_name_${numeric[1]}`] : null;
-    moveNames[moveId] = moveName(
-      moveId,
-      { [moveId]: name || pvp.moves.find((v: Raw) => v.moveId === moveId)?.name || moveId },
-    );
-    moves[moveId] = {
-      id: moveId,
-      name: moveNames[moveId],
-      type: (m.pokemonType || "").replace("POKEMON_TYPE_", "").toLowerCase(),
-      power: m.power || 0,
-      energy: m.energyDelta || 0,
-      duration: m.durationMs / 1000,
-    };
-  }
   const cpm = gm.find((r) => r.templateId === "PLAYER_LEVEL_SETTINGS")?.data
     ?.playerLevel?.cpMultiplier;
   const upgrades = gm.find((r) => r.templateId === "POKEMON_UPGRADE_SETTINGS")
@@ -419,7 +432,7 @@ export function normalizeData(
     rankings[league] = rows.map((r) => ({
       speciesId: r.speciesId,
       score: r.score,
-      moves: r.moveset || [],
+      moves: (r.moveset || []).map(gmMove),
     }));
   }
   return {

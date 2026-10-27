@@ -1497,6 +1497,57 @@ test("更新資料時列出 Game Master 招式池有、PvPoke 尚未收錄的招
   assert.match(gaps[0], /：maschiff PAYBACK$/);
 });
 
+test("PvPoke 招式代號對應到 Game Master 的招式數值", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number, moves: Record<string, string[]> = {}) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [], ...moves,
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("espeon", 196, { fastMoves: ["HIDDEN_POWER_BUG"], chargedMoves: ["FUTURE_SIGHT"], eliteMoves: ["FUTURE_SIGHT"] }),
+    base("genesect_douse", 649, { chargedMoves: ["TECHNO_BLAST_DOUSE", "PLASMA_FISTS"] }),
+    base("aegislash_shield", 681, { fastMoves: ["AEGISLASH_CHARGE_PSYCHO_CUT"] }),
+  ];
+  const move = (template: string, movementId: string | number, type: string) => ({
+    templateId: template,
+    data: { moveSettings: { movementId, pokemonType: `POKEMON_TYPE_${type}`, power: 100, energyDelta: -50, durationMs: 2000 } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    move("V0275_MOVE_FUTURESIGHT", "FUTURESIGHT", "PSYCHIC"),
+    move("V0281_MOVE_HIDDEN_POWER_FAST", "HIDDEN_POWER_FAST", "NORMAL"),
+    move("V0339_MOVE_TECHNO_BLAST_WATER", "TECHNO_BLAST_WATER", "WATER"),
+    move("V0497_MOVE_PLASMA_FISTS", 497, "ELECTRIC"),
+    move("V0012_MOVE_PSYCHO_CUT_FAST", "PSYCHO_CUT_FAST", "PSYCHIC"),
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) => [cap, [
+    { speciesId: "espeon", score: 2, moveset: ["HIDDEN_POWER_BUG", "FUTURE_SIGHT"] },
+    ...Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 })),
+  ]]));
+  const snapshot = normalizeData(
+    { pokemon, moves: [{ moveId: "HIDDEN_POWER_BUG", type: "bug" }] }, gm, "", ranks, "test-version",
+  );
+  const { species, moves, rankings } = snapshot;
+  assert.deepEqual(species.espeon.charged, ["FUTURESIGHT"]);
+  assert.deepEqual(species.espeon.elite, ["FUTURESIGHT"]);
+  assert.deepEqual(species.genesect_douse.charged, ["TECHNO_BLAST_WATER", "PLASMA_FISTS"]);
+  assert.deepEqual(species.aegislash_shield.fast, ["PSYCHO_CUT"]);
+  assert.deepEqual(rankings["1500"][0].moves, ["HIDDEN_POWER_BUG", "FUTURESIGHT"]);
+  assert.equal(moves.PLASMA_FISTS.type, "electric");
+  assert.equal(moves.HIDDEN_POWER.type, "normal");
+  assert.equal(moves.HIDDEN_POWER_BUG.type, "bug");
+  assert.equal(moves.HIDDEN_POWER_BUG.name, "覺醒力量（蟲）");
+  for (const s of Object.values(species))
+    for (const id of [...s.fast, ...s.charged, ...s.elite]) assert.ok(moves[id], id);
+});
+
 test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取淨化個體的進化成本與淨化成本", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, evolutions?: string[]) => ({
