@@ -211,6 +211,79 @@ test("保留理由明示 PvP、團體戰，且屬性使用中文", () => {
   assert.equal(typeName("psychic"), "超能力");
 });
 
+test("招式學習器依招式池分出一般／厲害、成功率、遷怒限制與先進化", () => {
+  const snapshot = fixture();
+  snapshot.version = "move-training-fixture";
+  Object.assign(snapshot.moves, {
+    FURY_CUTTER: { id: "FURY_CUTTER", name: "連斬", type: "bug", power: 1, energy: 6, duration: 0.5 },
+    TACKLE: { id: "TACKLE", name: "撞擊", type: "normal", power: 5, energy: 5, duration: 0.5 },
+    X_SCISSOR: { id: "X_SCISSOR", name: "十字剪", type: "bug", power: 45, energy: -35, duration: 1.6 },
+    BUG_BUZZ: { id: "BUG_BUZZ", name: "蟲鳴", type: "bug", power: 150, energy: -50, duration: 3.7 },
+    SWIFT: { id: "SWIFT", name: "高速星星", type: "normal", power: 65, energy: -50, duration: 2.8 },
+  });
+  const moves = {
+    fast: ["BUG_BITE", "FURY_CUTTER", "TACKLE", "HIDDEN_POWER_BUG", "HIDDEN_POWER_FIRE"],
+    charged: ["STRUGGLE", "X_SCISSOR", "BUG_BUZZ", "SWIFT"],
+    elite: ["BUG_BUZZ"],
+  };
+  snapshot.species.caterpie = species("caterpie", moves);
+  snapshot.species.caterpie_shadow = species("caterpie_shadow", { ...moves, tags: ["shadow"] });
+  snapshot.species.egg = species("egg", {
+    fast: ["NO_PVE"],
+    charged: [],
+    evolutions: [{ id: "caterpie", candy: 12, condition: null }],
+  });
+  snapshot.rankings["10000"] = [
+    { speciesId: "caterpie", score: 100, moves: ["BUG_BITE", "X_SCISSOR", "STRUGGLE"] },
+    { speciesId: "caterpie_shadow", score: 90, moves: ["BUG_BITE", "X_SCISSOR", "STRUGGLE"] },
+  ];
+  const [regular, shadow, egg, ready] = evaluateCollection([
+    record("regular", { fastMove: "連斬", chargeMove: "STRUGGLE" }),
+    record("shadow", {
+      speciesId: "caterpie_shadow", shadow: true, fastMove: "BUG_BITE", chargeMove: "FRUSTRATION",
+    }),
+    record("egg", { speciesId: "egg" }),
+    record("ready", { fastMove: "BUG_BITE", chargeMove: "BUG_BUZZ" }),
+  ], snapshot, settings);
+  const bugRaid = (p: typeof regular) =>
+    p.analysis!.moveTraining!.find((a) => a.purpose === "raid" && a.label.includes("蟲屬性"))!;
+  const pvp = (p: typeof regular) =>
+    p.analysis!.moveTraining!.find((a) => a.purpose === "pvp")!;
+  const steps = (a: ReturnType<typeof pvp>) =>
+    a.steps.map(({ tm, from, to, odds, blocked }) => ({ tm, from, to, odds, blocked }));
+
+  assert.equal(bugRaid(regular).status, "train");
+  // Both Hidden Power types count as one roll: BUG_BITE, TACKLE or Hidden Power.
+  assert.deepEqual(steps(bugRaid(regular)), [
+    { tm: "fast", from: "FURY_CUTTER", to: "BUG_BITE", odds: 3, blocked: false },
+    { tm: "eliteCharged", from: "STRUGGLE", to: "BUG_BUZZ", odds: 1, blocked: false },
+  ]);
+  assert.ok(bugRaid(regular).dps!.best > bugRaid(regular).dps!.current);
+  assert.equal(pvp(regular).label, "大師聯盟 環境 #1");
+  assert.deepEqual(steps(pvp(regular)), [
+    { tm: "fast", from: "FURY_CUTTER", to: "BUG_BITE", odds: 3, blocked: false },
+    { tm: "charged", from: null, to: "X_SCISSOR", odds: 2, blocked: false },
+  ]);
+  assert.match(pvp(regular).steps[1].note!, /先解鎖第二特殊招式/);
+  assert.ok(regular.analysis!.actions.some((a) => a.includes("「招式學習器」")));
+
+  assert.deepEqual(steps(bugRaid(shadow)), [
+    { tm: "eliteCharged", from: null, to: "BUG_BUZZ", odds: 1, blocked: false },
+  ]);
+  assert.deepEqual(steps(pvp(shadow)), [
+    { tm: "charged", from: null, to: "X_SCISSOR", odds: 3, blocked: false },
+    { tm: "charged", from: "FRUSTRATION", to: "STRUGGLE", odds: 2, blocked: true },
+  ]);
+  assert.match(pvp(shadow).steps[1].note!, /遷怒/);
+
+  assert.ok(egg.analysis!.moveTraining!.length > 0);
+  assert.ok(egg.analysis!.moveTraining!.every((a) =>
+    a.status === "evolveFirst" && a.speciesId === "caterpie" && !a.steps.length,
+  ));
+  assert.equal(bugRaid(ready).status, "ready");
+  assert.deepEqual(bugRaid(ready).steps, []);
+});
+
 test("每種物種至少 40/45 的最高 IV 個體保留一隻", () => {
   const snapshot = fixture();
   snapshot.version = "high-iv-representatives-fixture";

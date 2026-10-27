@@ -1829,6 +1829,200 @@ body:has(.drawer-backdrop) .toast.toast-stacked {
   font-size: 12.5px;
   font-weight: 500;
 }
+
+/* ---------- Move training ---------- */
+.tm-panel {
+  margin-bottom: 16px;
+}
+.tm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 20px;
+  text-align: left;
+  transition: background-color 0.12s;
+}
+.tm-toggle:hover {
+  background: var(--surface-2);
+}
+.tm-toggle > svg:first-child {
+  flex: none;
+  color: var(--green);
+}
+.tm-toggle-title {
+  flex: 1;
+  min-width: 0;
+}
+.tm-toggle-title strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.tm-toggle-title small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.tm-toggle-hint {
+  flex: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.tm-toggle > svg:last-child {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.tm-toggle[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+.tm-stale {
+  margin: 0;
+  padding: 0 20px 14px;
+}
+.tm-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.tm-tabs button {
+  margin-bottom: -1px;
+}
+.tm-table td:last-child {
+  text-align: left;
+}
+.tm-table tbody tr.tm-static {
+  cursor: default;
+}
+.tm-table tbody tr.tm-static:hover {
+  background: none;
+}
+.tm-table tbody:not(:last-child) tr:last-child td {
+  border-bottom: 1px solid var(--line);
+}
+.tm-group-row th {
+  padding: 8px 16px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.tm-group-row th > span {
+  margin-left: 8px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.tm-table .pokemon-token {
+  width: 36px;
+  height: 36px;
+}
+.tm-table .pokemon-cell strong {
+  font-size: 14px;
+}
+.tm-move {
+  min-width: 220px;
+  white-space: normal;
+}
+.tm-move small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.tm-move small.blocked {
+  color: var(--amber);
+  font-weight: 500;
+}
+.tm-odds {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.tm-odds.sure {
+  color: var(--green);
+}
+.tm-dps {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.tm-table td.tm-none {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+}
+.tm-more td {
+  padding: 8px 16px;
+  text-align: left;
+}
+.tm-more button {
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tm-empty {
+  padding: 0 20px 12px;
+}
+.tm-step em {
+  display: block;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-style: normal;
+}
+.tm-step em.blocked {
+  color: var(--amber);
+  font-weight: 500;
+}
+.tm-footnote {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line);
+}
+.tm-advice {
+  margin-top: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.tm-advice > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tm-advice > div:first-child > strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+.tm-advice > p {
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.tm-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tm-badge.eliteFast,
+.tm-badge.eliteCharged {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
 .purification-card {
   padding: 16px;
   border: 1px solid var(--line);

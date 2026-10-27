@@ -149,6 +149,35 @@ export type RaidResult = {
   targets: { level: number; cp: number; dps: number; cost: Cost | null }[];
   condition: string | null;
 };
+export type MoveTrainingTm = "fast" | "charged" | "eliteFast" | "eliteCharged";
+export const moveTrainingTmLabels: Record<MoveTrainingTm, string> = {
+  fast: "招式學習器（一般）",
+  charged: "招式學習器（特殊）",
+  eliteFast: "厲害招式學習器（一般）",
+  eliteCharged: "厲害招式學習器（特殊）",
+};
+export type MoveTrainingStep = {
+  tm: MoveTrainingTm;
+  /** Move to replace; null means the newly unlocked second charged move. */
+  from: string | null;
+  to: string;
+  /** Equally likely outcomes of one use; 1 means the target move is certain. */
+  odds: number;
+  blocked: boolean;
+  note: string | null;
+};
+export type MoveTrainingAdvice = {
+  purpose: "raid" | "pvp";
+  label: string;
+  /** Raid type rank or PvPoke league rank of the target species. */
+  rank: number;
+  speciesId: string;
+  name: string;
+  status: "ready" | "train" | "evolveFirst" | "incomplete";
+  steps: MoveTrainingStep[];
+  /** Lv.35 cycle DPS with the current and the recommended raid moves. */
+  dps: { current: number; best: number } | null;
+};
 export type Analysis = {
   category: "transfer" | "collect" | "invest" | "evolve" | "review";
   reasons: string[];
@@ -168,6 +197,8 @@ export type Analysis = {
     }[];
   } | null;
   purification: { iv: number[]; cp: number | null; verdict: string } | null;
+  /** Absent in analyses saved before move training advice existed. */
+  moveTraining?: MoveTrainingAdvice[];
   comparedWith: string[];
   snapshot: string | null;
   evaluatedAt: string;

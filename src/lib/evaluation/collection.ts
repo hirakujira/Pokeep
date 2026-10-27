@@ -11,6 +11,7 @@ import {
 import { specialStateFromMoves } from "../iphone-safety";
 import { typeName } from "../type-names";
 import { assess } from "./assess";
+import type { CombatPick } from "./move-training";
 import {
   categorize,
   type EvolutionChoice,
@@ -19,7 +20,7 @@ import {
   type Pick,
 } from "./categorize";
 
-type AddPick = (p: Pokemon, reason: string, peers: Pokemon[]) => void;
+type AddPick = (p: Pokemon, reason: string, peers: Pokemon[], combat?: CombatPick) => void;
 
 function quality(p: Pokemon) {
   const f = effective(p);
@@ -102,6 +103,7 @@ function pickPvp(confirmed: Pokemon[], settings: Settings, add: AddPick) {
       p,
       `${l.name} 入選 PvP ${l.league === 10000 ? "大師" : l.league === 1500 ? "超級" : "高級"}聯盟：環境排名 #${l.metaRank}／IV 排名 #${l.ivRank}`,
       rows.map((r) => r.p),
+      { league: l },
     );
   }
 }
@@ -129,6 +131,7 @@ function pickRaids(confirmed: Pokemon[], settings: Settings, add: AddPick) {
         p,
         `${r.name} 入選團體戰 ${typeName(r.type)}屬性隊伍：基準物種輸出排名 #${r.rank}`,
         rows.map((r) => r.p),
+        { raid: r },
       );
   }
 }
@@ -362,10 +365,10 @@ export function evaluateCollection(
       p.analysis!.currentLevels.length > 0,
   );
   const selected = new Map<string, Pick[]>();
-  const add: AddPick = (p, reason, peers) =>
+  const add: AddPick = (p, reason, peers, combat) =>
     selected.set(p.id, [
       ...(selected.get(p.id) || []),
-      { reason, peers: peers.filter((q) => q.id !== p.id).map((q) => q.id) },
+      { reason, peers: peers.filter((q) => q.id !== p.id).map((q) => q.id), ...combat },
     ]);
   pickCollectibles(living, settings, add);
   const highIvPeers = pickHighIv(confirmed, add);

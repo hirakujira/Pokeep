@@ -14,7 +14,7 @@ import { combatPower, inferLevels, powerCost, rankIV } from "./stats";
 import { evolutionPaths, type EvolutionPath } from "./evolution";
 import { cycleDps, raidBenchmarks } from "./raid";
 
-const localizedMoveAliases: Record<string, string> = { "逆鱗": "OUTRAGE" };
+export const localizedMoveAliases: Record<string, string> = { "逆鱗": "OUTRAGE" };
 // These labels were used for the same chest-worn goggles in saved Charmander
 // screenshots. Keep the original wording as evidence, but group their collection slot.
 const charmanderGoggles = new Set([

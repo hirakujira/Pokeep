@@ -9,9 +9,10 @@ import {
 } from "../types";
 import { specialStateFromMoves } from "../iphone-safety";
 import { moveName } from "../move-names";
+import { moveId, moveTraining, type CombatPick } from "./move-training";
 import { reviewReason } from "./review";
 
-export type Pick = { reason: string; peers: string[] };
+export type Pick = { reason: string; peers: string[] } & CombatPick;
 export type EvolutionOption = { target: Species; candy: number; condition: string | null };
 export type EvolutionChoice = {
   winners: Map<string, EvolutionOption[]>;
@@ -227,21 +228,15 @@ function addCombatActions(
   if (!f.fastMove || !f.chargeMove)
     a.actions.push("招式資料未完整：補充後才能判斷是否需要換招。");
   else if (bestLeague?.moves.length) {
-    const normalizeMove = (v: string) =>
-      snapshot?.moves[v]?.id ||
-      Object.values(snapshot?.moves || {}).find(
-        (m) => m.name === v || moveName(m.id, snapshot?.moveNames) === v,
-      )?.id ||
-      v;
     const currentMoves = [f.fastMove, f.chargeMove, f.chargeMove2]
       .filter(Boolean)
-      .map((v) => normalizeMove(v!));
+      .map((v) => moveId(v!, snapshot));
     const missing = bestLeague.moves.filter(
       (m) => !currentMoves.includes(m),
     );
     if (missing.length)
       a.actions.push(
-        `PvP 目標招式：${bestLeague.moves.map((m) => moveName(m, snapshot?.moveNames)).join("／")}。缺少 ${missing.map((m) => moveName(m, snapshot?.moveNames)).join("、")}；依一般／特殊招式類型使用學習器，限定招式另核對。`,
+        `PvP 目標招式：${bestLeague.moves.map((m) => moveName(m, snapshot?.moveNames)).join("／")}。缺少 ${missing.map((m) => moveName(m, snapshot?.moveNames)).join("、")}；該用哪種學習器見下方「招式學習器」。`,
       );
     if (!f.chargeMove2)
       a.actions.push(
@@ -263,6 +258,9 @@ export function categorize(p: Pokemon, d: CollectionDecisions) {
   assignCategory(p, f, a, picks, hasCombat, d);
   addPeerReasons(p, a, d);
   a.reasons.push(...picks.map((x) => x.reason));
-  if (hasCombat) addCombatActions(a, f, d.snapshot, d.settings);
+  if (hasCombat) {
+    addCombatActions(a, f, d.snapshot, d.settings);
+    if (d.snapshot) a.moveTraining = moveTraining(f, picks, d.snapshot);
+  }
   a.reasons = [...new Set(a.reasons)];
 }

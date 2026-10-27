@@ -4,6 +4,7 @@ import { localizeMoveText, moveName } from "@/lib/move-names";
 import { localizeSpeciesName } from "@/lib/species-names";
 import { typeName } from "@/lib/type-names";
 import { date, evolutionCandySummary, number } from "./format";
+import { MoveTrainingSection } from "./move-training";
 import { CostLine, Status } from "./ui";
 
 export function DrawerAnalysis({
@@ -71,6 +72,9 @@ export function DrawerAnalysis({
             </p>
           ))}
         </section>
+      ) : null}
+      {a?.moveTraining?.length ? (
+        <MoveTrainingSection advice={a.moveTraining} moveNames={moveNames} />
       ) : null}
       {!!a?.leagues.length && (
         <section className="analysis-section">

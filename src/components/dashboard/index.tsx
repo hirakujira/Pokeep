@@ -5,6 +5,7 @@ import { categoryLabels } from "@/lib/types";
 import { tabs } from "./constants";
 import { number } from "./format";
 import { IphoneView } from "./iphone-view";
+import { MoveTrainingPanel } from "./move-training";
 import { PokemonDrawer } from "./pokemon-drawer";
 import { pokemonActions } from "./pokemon-actions";
 import { ResultsPanel } from "./results-panel";
@@ -56,6 +57,7 @@ export default function Dashboard() {
         living.filter((p) => p.analysis?.category === c).length,
       ]),
     );
+  const moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
   const chosen = selected ? state.pokemon.find((p) => p.id === selected) : null;
   const batch = phoneState?.batch;
   const progress = batch ? transferProgress(batch, state.pokemon) : null;
@@ -158,6 +160,13 @@ export default function Dashboard() {
                   batch={batch}
                   busy={busy}
                   actions={transferActions}
+                />
+              )}
+              {filter === "invest" && (
+                <MoveTrainingPanel
+                  records={living}
+                  moveNames={moveNames}
+                  onSelect={setSelected}
                 />
               )}
               <ResultsPanel
