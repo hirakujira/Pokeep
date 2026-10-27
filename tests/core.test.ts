@@ -1331,16 +1331,57 @@ test("截圖的招式名稱對應多個代號時，依物種招式池選出唯�
   const snapshot = fixture();
   const move = (id: string, name: string) => ({ id, name, type: "water", power: 5, energy: 5, duration: 0.5 });
   snapshot.moves.WATER_GUN = move("WATER_GUN", "水槍");
-  snapshot.moves.WATER_GUN_FAST_BLASTOISE = move("WATER_GUN_FAST_BLASTOISE", "水槍");
+  snapshot.moves.WATER_GUN_FAST_BLASTOISE = move("WATER_GUN_FAST_BLASTOISE", "水槍（水箭龜專屬）");
+  snapshot.moves.WEATHER_BALL_NORMAL = move("WEATHER_BALL_NORMAL", "氣象球");
+  snapshot.moves.WEATHER_BALL_FIRE = move("WEATHER_BALL_FIRE", "氣象球（火）");
   snapshot.moves.OUTRAGE = move("OUTRAGE", "逆麟");
   const squirtle = species("squirtle", { fast: ["WATER_GUN", "TACKLE"] });
   assert.equal(resolveMoveId(snapshot, "水槍", squirtle), "WATER_GUN");
-  assert.equal(resolveMoveId(snapshot, "水槍"), "水槍");
-  assert.equal(resolveMoveId(snapshot, "水槍", species("both", { fast: ["WATER_GUN", "WATER_GUN_FAST_BLASTOISE"] })), "水槍");
+  assert.equal(resolveMoveId(snapshot, "水槍"), "WATER_GUN");
+  assert.equal(resolveMoveId(snapshot, "水槍", species("special", { fast: ["WATER_GUN_FAST_BLASTOISE"] })), "WATER_GUN_FAST_BLASTOISE");
+  assert.equal(resolveMoveId(snapshot, "氣象球", species("castform_sunny", { charged: ["WEATHER_BALL_FIRE"] })), "WEATHER_BALL_FIRE");
+  assert.equal(resolveMoveId(snapshot, "氣象球"), "WEATHER_BALL_NORMAL");
   assert.equal(resolveMoveId(snapshot, "蟲咬"), "BUG_BITE");
   assert.equal(resolveMoveId(snapshot, "BUG_BITE"), "BUG_BITE");
   assert.equal(resolveMoveId(snapshot, "逆鱗"), "OUTRAGE");
   assert.equal(resolveMoveId(snapshot, "不存在的招式", squirtle), "不存在的招式");
+});
+
+test("同名招式：一般版維持原名，寶可夢專屬版標專屬，屬性版標屬性", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const pokemon = Array.from({ length: 100 }, (_, index) => ({
+    speciesId: `fixture_${index}`, speciesName: `fixture_${index}`, dex: index + 1, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"], fastMoves: [], chargedMoves: [],
+  }));
+  const move = (number: string, id: string, type: string) => ({
+    templateId: `V${number}_MOVE_${id}`,
+    data: { moveSettings: { movementId: id, pokemonType: `POKEMON_TYPE_${type}`, power: 10, energyDelta: 5, durationMs: 1000 } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    { templateId: "V0009_POKEMON_BLASTOISE", data: { pokemonSettings: {} } },
+    move("0230", "WATER_GUN_FAST", "WATER"),
+    move("0232", "WATER_GUN_FAST_BLASTOISE", "WATER"),
+    move("0291", "WEATHER_BALL_NORMAL", "NORMAL"),
+    move("0292", "WEATHER_BALL_FIRE", "FIRE"),
+  ];
+  const texts = [
+    ["pokemon_name_0009", "水箭龜"], ["move_name_0230", "水槍"], ["move_name_0232", "水槍"],
+    ["move_name_0291", "氣象球"], ["move_name_0292", "氣象球"],
+  ].map(([id, text]) => `RESOURCE ID: ${id}\nTEXT: ${text}`).join("\n");
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { moves, moveNames } = normalizeData({ pokemon, moves: [] }, gm, texts, ranks, "test-version");
+  assert.equal(moves.WATER_GUN.name, "水槍");
+  assert.equal(moves.WATER_GUN_FAST_BLASTOISE.name, "水槍（水箭龜專屬）");
+  assert.equal(moveNames.WATER_GUN_FAST_BLASTOISE, "水槍（水箭龜專屬）");
+  assert.equal(moves.WEATHER_BALL_NORMAL.name, "氣象球");
+  assert.equal(moves.WEATHER_BALL_FIRE.name, "氣象球（火）");
 });
 
 test("PvPoke 招式代號對應到 Game Master 的招式數值", async () => {

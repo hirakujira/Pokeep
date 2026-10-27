@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { dataDir, getSnapshot, saveSnapshot } from "./store";
 import type { Fields, Gender, Snapshot, Species, VisualForm } from "./types";
 import { localizedMoveAliases, moveName } from "./move-names";
+import { typeName } from "./type-names";
 
 const urls: Record<string, string> = {
   "pvpoke.json":
@@ -49,6 +50,8 @@ const compactMove = (id: string) =>
     .replace(/^AEGISLASH_CHARGE_/, "")
     .replace(/^TECHNO_BLAST_DOUSE$/, "TECHNO_BLAST_WATER")
     .replace(/_/g, "");
+// Wrap variants no Pokémon learns; the Game Master still lists them.
+const unusedVariantLabels: Record<string, string> = { GREEN: "綠色", PINK: "粉紅色" };
 // PvPoke marks these available, special-case Pokémon as unreleased because
 // ordinary PvP simulations do not cover them. They still belong in the catalog.
 const catalogExceptions = new Set(["ditto", "shedinja", "cosmog", "cosmoem"]);
@@ -283,6 +286,28 @@ export function normalizeData(
       moveNames[pm.moveId] = moveName(pm.moveId);
       moves[pm.moveId] = { ...moves.HIDDEN_POWER, id: pm.moveId, name: moveNames[pm.moveId], type: pm.type };
     }
+  // Moves sharing one in-game name: a Pokémon's own version reads 水槍（水箭龜專屬）
+  // and typed versions carry their type, while the ordinary or Normal-type one
+  // keeps the plain name.
+  const dexByPokemon = new Map<string, string>();
+  for (const row of gm) {
+    const match = row.templateId.match(/^V(\d{4})_POKEMON_([A-Z0-9_]+)$/);
+    if (match && !dexByPokemon.has(match[2])) dexByPokemon.set(match[2], match[1]);
+  }
+  const sameName = new Map<string, Snapshot["moves"][string][]>();
+  for (const m of Object.values(moves)) sameName.set(m.name, [...(sameName.get(m.name) ?? []), m]);
+  for (const group of sameName.values()) {
+    if (group.length < 2) continue;
+    const typed = new Set(group.map((m) => m.type)).size > 1;
+    for (const m of group) {
+      const suffix = m.id.split("_").at(-1)!;
+      const dex = dexByPokemon.get(suffix);
+      const label = dex
+        ? `${tr[`pokemon_name_${dex}`] ?? suffix}專屬`
+        : unusedVariantLabels[suffix] ?? (typed && m.type !== "normal" ? typeName(m.type) : null);
+      if (label) moveNames[m.id] = m.name = `${m.name}（${label}）`;
+    }
+  }
   const gmMoveIds = new Map(Object.keys(moves).map((id) => [compactMove(id), id]));
   const gmMove = (id: string) => (moves[id] ? id : gmMoveIds.get(compactMove(id)) ?? id);
   const gmMoves = (ids: string[] = []) => [...new Set(ids.map(gmMove))];
@@ -578,18 +603,22 @@ export function resolveSpecies(
   return compatible.length === 1 ? compatible[0] : null;
 }
 /**
- * Screenshots show only a move's name, and some names belong to several moves
- * (Blastoise's own Water Gun, the typed Weather Balls); the species' pool picks
- * among those. An unresolved name is kept as read.
+ * Screenshots show the in-game name, which several moves can share (Blastoise's
+ * own Water Gun, the typed Weather Balls); the species' pool picks among those,
+ * then the move whose name has no added label. An unresolved name is kept as read.
  */
 export function resolveMoveId(snapshot: Snapshot, value: string, species?: Species | null) {
   const id = localizedMoveAliases[value] ?? value;
   if (snapshot.moves[id]) return id;
-  const named = Object.values(snapshot.moves).filter((m) => m.name === value).map((m) => m.id);
-  if (named.length === 1) return named[0];
+  const named = Object.values(snapshot.moves).filter(
+    (m) => m.name === value || m.name.replace(/（[^）]*）$/, "") === value,
+  );
+  if (named.length === 1) return named[0].id;
   const pool = new Set([...(species?.fast ?? []), ...(species?.charged ?? []), ...(species?.elite ?? [])]);
-  const inPool = named.filter((m) => pool.has(m));
-  return inPool.length === 1 ? inPool[0] : value;
+  const inPool = named.filter((m) => pool.has(m.id));
+  if (inPool.length === 1) return inPool[0].id;
+  const exact = named.filter((m) => m.name === value);
+  return exact.length === 1 ? exact[0].id : value;
 }
 export function publicSnapshot(snapshot = getSnapshot()) {
   return snapshot
