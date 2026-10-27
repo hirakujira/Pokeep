@@ -77,6 +77,17 @@ export function specialStateFromMoves(fields: Fields) {
   } as const;
 }
 
+/** A single cropped appearance can confuse a brief purple effect with shadow. */
+export function requireSpecialCorroboration(fields: Fields, snapshot: Snapshot | null) {
+  if (specialStateFromMoves(fields).signal ||
+      (fields.shadow !== true && fields.purified !== true)) return false;
+  fields.shadow = null;
+  fields.purified = null;
+  const base = fields.speciesId?.replace(/_shadow$/, "");
+  if (base && snapshot?.species[base]) fields.speciesId = base;
+  return true;
+}
+
 export function samePhoneIdentity(a: Fields, b: Fields) {
   return identityKeys.every(
     (key) => a[key] !== null && b[key] !== null && a[key] === b[key],
@@ -257,7 +268,7 @@ export function transferExclusion(
 }
 
 export function transferSignature(
-  batch: Pick<TransferBatch, "scanId" | "entries">,
+  batch: Pick<TransferBatch, "scanId" | "entries" | "searchExclusions">,
   records: Pokemon[],
   snapshot: Snapshot | null,
   settings: Settings,
@@ -280,6 +291,7 @@ export function transferSignature(
     .update(
       JSON.stringify({
         scanId: batch.scanId,
+        ...(batch.searchExclusions && { searchExclusions: batch.searchExclusions }),
         selected,
         peers,
         snapshot: snapshot?.version,

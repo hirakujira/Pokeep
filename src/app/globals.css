@@ -895,6 +895,32 @@ main > .iphone-panel {
   align-items: center;
   gap: 12px;
 }
+.transfer-search-options {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px 8px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.transfer-search-options > strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+.transfer-search-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.transfer-search-options small {
+  color: var(--muted);
+}
+.transfer-search-options code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
 .transfer-selection-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1001,6 +1027,10 @@ td:last-child > svg {
   gap: 6px;
   font-size: 15px;
   font-weight: 600;
+}
+.pokemon-display-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .pokemon-cell strong svg {
   color: oklch(68% 0.14 85);

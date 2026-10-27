@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { dataDir, getSnapshot, saveSnapshot } from "./store";
-import type { Snapshot, Species } from "./types";
+import type { Fields, Snapshot, Species } from "./types";
 import { moveName } from "./move-names";
 
 const urls: Record<string, string> = {
@@ -40,6 +40,29 @@ const norm = (s: string) =>
     .replace(/galarian/g, "galar")
     .replace(/hisuian/g, "hisui")
     .replace(/paldean/g, "paldea");
+// PvPoke marks these available, special-case Pokémon as unreleased because
+// ordinary PvP simulations do not cover them. They still belong in the catalog.
+const catalogExceptions = new Set(["ditto", "shedinja", "cosmog"]);
+
+export function addCatalogForms(species: Snapshot["species"]) {
+  const aliases: Record<string, { base: string; form: string | null }> = {
+    nidoran_m: { base: "nidoran_male", form: null },
+    squawkabilly_blue: { base: "squawkabilly", form: "藍羽" },
+    squawkabilly_green: { base: "squawkabilly", form: "綠羽" },
+    squawkabilly_white: { base: "squawkabilly", form: "白羽" },
+    squawkabilly_yellow: { base: "squawkabilly", form: "黃羽" },
+  };
+  for (const [id, { base, form }] of Object.entries(aliases)) {
+    const parent = species[base];
+    if (!parent || species[id]) continue;
+    species[id] = {
+      ...parent,
+      id,
+      name: form ? `${parent.name}（${form}）` : parent.name,
+      form,
+    };
+  }
+}
 export function genderlessByDex(gm: Raw[]) {
   const entries = new Map<number, boolean[]>();
   for (const row of gm) {
@@ -84,7 +107,8 @@ export function normalizeData(
     names: Record<string, string> = {},
     moveNames: Record<string, string> = {};
   for (const p of pvp.pokemon) {
-    if (p.released === false || !p.baseStats || p.tags?.includes("mega"))
+    if ((p.released === false && !catalogExceptions.has(p.speciesId)) ||
+        !p.baseStats || p.tags?.includes("mega"))
       continue;
     const baseId = p.speciesId.replace(/_shadow$/, ""),
       g = gmPokemon.get(norm(baseId));
@@ -179,6 +203,8 @@ export function normalizeData(
     };
     names[p.speciesId] = name;
   }
+  addCatalogForms(species);
+  for (const [id, entry] of Object.entries(species)) names[id] = entry.name;
   const moves: Snapshot["moves"] = {};
   for (const row of gm) {
     const m = row.data?.moveSettings;
@@ -298,6 +324,7 @@ export function resolveSpecies(
   form: string | null,
   shadow: boolean | null,
   providedId: string | null,
+  moves?: Pick<Fields, "fastMove" | "chargeMove" | "chargeMove2">,
 ): Species | null {
   if (providedId && snapshot.species[providedId]) {
     const wanted =
@@ -315,12 +342,25 @@ export function resolveSpecies(
   const isForm = (s: Species) =>
     !form || form === "normal" || form === "一般"
       ? !s.form
+      : /^(一般|普通)(形態|型態)$/.test(form)
+        ? s.id.replace(/_shadow$/, "").endsWith("_standard")
       : s.id.includes(form.toLowerCase().replace("alola", "alolan")) ||
         s.form?.toLowerCase().includes(form.toLowerCase());
   const exact = candidates.filter(
     (s) => Boolean(s.tags.includes("shadow")) === Boolean(shadow) && isForm(s),
   );
-  return exact.length === 1 ? exact[0] : null;
+  if (exact.length === 1) return exact[0];
+  if (!moves || exact.length < 2) return null;
+  const observed = [moves.fastMove, moves.chargeMove, moves.chargeMove2]
+    .filter((move): move is string => Boolean(move));
+  if (!observed.length) return null;
+  const compatible = exact.filter((species) =>
+    (!moves.fastMove || [...species.fast, ...species.elite].includes(moves.fastMove)) &&
+    [moves.chargeMove, moves.chargeMove2].every((move) =>
+      !move || [...species.charged, ...species.elite].includes(move),
+    ),
+  );
+  return compatible.length === 1 ? compatible[0] : null;
 }
 export function publicSnapshot(snapshot = getSnapshot()) {
   return snapshot

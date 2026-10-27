@@ -2,12 +2,12 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { iphoneUseEntrypoint } from "./iphone-mcp";
 import { getRuntimeConfig } from "./runtime-config";
+import { allowedPhoneSearchQuery } from "./transfer-search-filters";
 
 /** Unicode search entry for Pokémon GO's custom field, serialized with iPhone Use. */
 export function injectSearchText(query: string): Promise<void> {
-  const match = query.match(/^([1-9]\d{0,4})(?:&!?背卡)?$/);
-  if (!match || Number(match[1]) > 10000)
-    throw new Error("只允許圖鑑編號與背卡搜尋");
+  if (!allowedPhoneSearchQuery(query))
+    throw new Error("只允許圖鑑編號與已核准的放生搜尋條件");
   const root = iphoneUseEntrypoint().root;
   return new Promise((resolve, reject) => {
     const child = spawn(

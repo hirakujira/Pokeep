@@ -295,11 +295,20 @@ test("清倉結果勾選批次只授權明列個體，拒絕重複與受保護�
   assert.equal((await request("transfers/execute-many", "POST", { pokemonIds: [first.id, first.id] })).status, 400);
   assert.equal((await request("transfers/execute-many", "POST", { pokemonIds: ids })).status, 400);
   store.put("pokemon", second.id, { ...second, locked: false });
-  const response = await request("transfers/execute-many", "POST", { pokemonIds: ids });
+  assert.equal((await request("transfers/execute-many", "POST", {
+    pokemonIds: ids, searchExclusions: ["background", "lucky", "shiny", "costume"],
+  })).status, 400);
+  assert.equal((await request("transfers/execute-many", "POST", {
+    pokemonIds: ids, searchExclusions: ["background", "background"],
+  })).status, 400);
+  const response = await request("transfers/execute-many", "POST", {
+    pokemonIds: ids, searchExclusions: ["background", "lucky", "shiny"],
+  });
   assert.equal(response.status, 200);
   const batch = (await response.json()) as TransferBatch;
   assert.equal(batch.mode, "bulk");
   assert.equal(batch.status, "approved");
+  assert.deepEqual(batch.searchExclusions, ["background", "lucky", "shiny"]);
   assert.deepEqual(batch.entries.map((entry) => entry.pokemonId), ids);
   assert.equal((await request("transfers/execute-many", "POST", { pokemonIds: ids })).status, 400);
   store.remove("transfer_batches", batch.id);
@@ -371,6 +380,59 @@ test("暫停批次按繼續只重試搜尋前失敗與未開始個體，拒絕�
   store.put("transfer_batches", batch.id, { ...single, signature: "stale" });
   assert.equal((await request(`transfers/${batch.id}/resume`, "POST")).status, 400);
   for (const pokemon of [done, retry, untouched]) store.remove("pokemon", pokemon.id);
+  store.remove("transfer_batches", batch.id);
+});
+test("暫停批次可跳過當前失敗個體並續跑，已送出及結果不明者不得跳過", async () => {
+  const { transferSignature } = await import("../src/lib/iphone-safety");
+  const snapshot = fixture();
+  store.saveSnapshot(snapshot);
+  const stamp = new Date().toISOString();
+  const analysis = { category: "transfer", currentLevels: [15] } as Pokemon["analysis"];
+  const failed = record("skip-failed", { favorite: false, cp: 180 }, { analysis });
+  const next = record("skip-next", { favorite: false, cp: 181 }, { analysis });
+  const noLongerEligible = record("skip-excluded", { favorite: false, cp: 182 }, {
+    analysis: { category: "review", currentLevels: [15] } as Pokemon["analysis"],
+  });
+  for (const pokemon of [failed, next, noLongerEligible]) store.put("pokemon", pokemon.id, pokemon);
+  const batch: TransferBatch = {
+    id: "skip-current-api-batch",
+    scanId: "skip-current-api-scan",
+    createdAt: stamp,
+    updatedAt: stamp,
+    status: "paused",
+    mode: "bulk",
+    selectedPokemonId: null,
+    signature: "",
+    entries: [
+      { pokemonId: failed.id, status: "skipped", reason: "確認畫面無法辨識", preparedAt: stamp, evidence: "frame.png" },
+      { pokemonId: next.id, status: "pending", reason: null },
+      { pokemonId: noLongerEligible.id, status: "pending", reason: null },
+    ],
+    error: "確認畫面無法辨識",
+    approvedAt: null,
+  };
+  batch.signature = transferSignature(batch, store.listPokemon(), snapshot, store.getSettings());
+  store.put("transfer_batches", batch.id, batch);
+  const response = await request(`transfers/${batch.id}/skip-current`, "POST");
+  assert.equal(response.status, 200);
+  const skipped = await response.json() as TransferBatch;
+  assert.equal(skipped.status, "approved");
+  assert.deepEqual(skipped.entries.map((entry) => entry.status), ["skipped", "pending", "skipped"]);
+  assert.match(skipped.entries[0].reason || "", /使用者選擇跳過/);
+  assert.match(skipped.entries[2].reason || "", /已不符合放生條件/);
+  assert.equal(store.get<Pokemon>("pokemon", failed.id)?.owned, true);
+  assert.equal((await request(`transfers/${batch.id}/skip-current`, "POST")).status, 400);
+  store.put("transfer_batches", batch.id, {
+    ...batch,
+    entries: [{ ...batch.entries[0], status: "uncertain", sentAt: stamp }, batch.entries[1]],
+  });
+  assert.equal((await request(`transfers/${batch.id}/skip-current`, "POST")).status, 400);
+  store.put("transfer_batches", batch.id, {
+    ...batch,
+    entries: [{ ...batch.entries[0], sentAt: stamp }, batch.entries[1]],
+  });
+  assert.equal((await request(`transfers/${batch.id}/skip-current`, "POST")).status, 400);
+  for (const pokemon of [failed, next, noLongerEligible]) store.remove("pokemon", pokemon.id);
   store.remove("transfer_batches", batch.id);
 });
 test("總數未知時須先保存逐隻截圖，再由使用者確認開始解析", async () => {
@@ -568,6 +630,18 @@ test("人工修正會持久保存、重新評估且可標記放生再恢復", as
   });
   assert.equal(response.status, 200);
   assert.equal(store.get<Pokemon>("pokemon", "edited")?.maxStatus, "dynamax");
+  response = await request("pokemon/edited", "PATCH", {
+    evolutionSilhouette: "unavailable",
+    verified: true,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(store.get<Pokemon>("pokemon", "edited")?.evolutionSilhouette, "unavailable");
+  response = await request("pokemon/edited", "PATCH", {
+    evolutionSilhouette: "unknown-branch",
+    verified: true,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(store.get<Pokemon>("pokemon", "edited")?.evolutionSilhouette, "unknown-branch");
   await request("pokemon/edited", "PATCH", { owned: false });
   assert.equal(store.get<Pokemon>("pokemon", "edited")?.owned, false);
   await request("pokemon/edited", "PATCH", { owned: true });

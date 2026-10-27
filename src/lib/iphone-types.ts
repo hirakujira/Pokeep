@@ -1,5 +1,6 @@
 import type { Fields } from "./types";
 import type { MaxStatus } from "./max-status";
+import type { TransferSearchFilter } from "./transfer-search-filters";
 
 export type ScanStatus =
   "queued" | "running" | "paused" | "completed" | "stopped" | "failed";
@@ -10,6 +11,7 @@ export type Scan = {
   stage: string;
   createdAt: string;
   updatedAt: string;
+  completedAt?: string;
   scanned: number;
   phase?: "capture" | "analysis";
   analyzed?: number;
@@ -44,7 +46,7 @@ export type ScanItem = {
   issues: string[];
   protectionClear: boolean;
   favoriteRechecked?: boolean;
-  evolutionSilhouette?: boolean | null;
+  evolutionSilhouette?: boolean | "unavailable" | "unknown-branch" | null;
   maxStatus?: MaxStatus | null;
   shinyReview?: {
     verdict: "normal" | "shiny" | "uncertain";
@@ -53,7 +55,14 @@ export type ScanItem = {
     referenceHashes?: string[];
     reviewedAt: string;
   };
+  specialReview?: {
+    verdict: "normal" | "shadow" | "purified" | "uncertain";
+    model: string;
+    reason: string;
+    reviewedAt: string;
+  };
   capturedAt: string;
+  analyzedAt?: string;
 };
 export type TransferEntry = {
   pokemonId: string;
@@ -88,6 +97,7 @@ export type TransferBatch = {
     | "stopped"
     | "stale";
   mode?: "single" | "bulk";
+  searchExclusions?: TransferSearchFilter[];
   selectedPokemonId?: string | null;
   signature: string;
   entries: TransferEntry[];

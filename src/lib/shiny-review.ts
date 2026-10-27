@@ -11,7 +11,7 @@ import { spriteSlug } from "./sprites";
 import { dataDir, get, put } from "./store";
 import type { Species } from "./types";
 
-const promptVersion = "shiny-two-frame-reference-v2";
+const promptVersion = "shiny-two-frame-reference-v3";
 const resultSchema = z.object({
   verdict: z.enum(["shiny", "normal", "uncertain"]),
   referenceDistinct: z.boolean(),
@@ -70,10 +70,24 @@ async function pngFromUrl(url: string) {
     : null;
 }
 
-async function referencePair(species: Species) {
+export function shinyReferenceSource(species: Species, observedForm: string | null) {
+  const base = species.id.replace(/_shadow$/, "");
+  if (base === "shellos" || base === "gastrodon") {
+    const sea = observedForm?.includes("東海") ? "east" : observedForm?.includes("西海") ? "west" : null;
+    // The default Pokémon endpoint is West Sea. Never compare an unidentified
+    // sea form against it, since that makes an ordinary East Sea look shiny.
+    return sea ? { key: `${species.id}-${sea}`, url: `https://pokeapi.co/api/v2/pokemon-form/${base}-${sea}` } : null;
+  }
+  const pokemon = species.form ? spriteSlug(species) : String(species.dex);
+  return pokemon ? { key: species.id, url: `https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(pokemon)}` } : null;
+}
+
+async function referencePair(species: Species, observedForm: string | null) {
   if (!/^[a-z0-9_]+$/.test(species.id)) return null;
-  const normalFile = path.join(referenceDir, `${species.id}-normal.png`);
-  const shinyFile = path.join(referenceDir, `${species.id}-shiny.png`);
+  const source = shinyReferenceSource(species, observedForm);
+  if (!source) return null;
+  const normalFile = path.join(referenceDir, `${source.key}-normal.png`);
+  const shinyFile = path.join(referenceDir, `${source.key}-shiny.png`);
   try {
     return [await fs.readFile(normalFile), await fs.readFile(shinyFile)] as [
       Buffer,
@@ -82,10 +96,8 @@ async function referencePair(species: Species) {
   } catch {
     // Fetch exact references together; never use a normal sprite as a shiny fallback.
   }
-  const pokemon = species.form ? spriteSlug(species) : String(species.dex);
-  if (!pokemon) return null;
   const response = await fetch(
-    `https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(pokemon)}`,
+    source.url,
     { cache: "no-store", signal: AbortSignal.timeout(12000) },
   );
   if (!response.ok) return null;
@@ -112,22 +124,24 @@ async function referencePair(species: Species) {
   return [normal, shiny] as [Buffer, Buffer];
 }
 
-function cachedReferences(species: Species) {
-  let pending = referencePending.get(species.id);
+function cachedReferences(species: Species, observedForm: string | null) {
+  const source = shinyReferenceSource(species, observedForm);
+  if (!source) return Promise.resolve(null);
+  let pending = referencePending.get(source.key);
   if (!pending) {
-    pending = referencePair(species)
+    pending = referencePair(species, observedForm)
       .catch(() => null)
-      .finally(() => referencePending.delete(species.id));
-    referencePending.set(species.id, pending);
+      .finally(() => referencePending.delete(source.key));
+    referencePending.set(source.key, pending);
   }
   return pending;
 }
 
-async function upperImage(file: string) {
+export async function upperAppearanceImage(file: string) {
   const meta = await sharp(file).metadata();
   if (!meta.width || !meta.height || meta.width >= meta.height) return null;
-  const height = Math.min(Math.floor(meta.height * 0.39), meta.height);
-  const maskTop = Math.floor(meta.height * 0.3);
+  const height = Math.min(Math.floor(meta.height * 0.45), meta.height);
+  const maskTop = Math.floor(meta.height * 0.38);
   return sharp(file)
     .extract({ left: 0, top: 0, width: meta.width, height })
     .composite([
@@ -175,7 +189,7 @@ async function judge(
     return cached;
   }
   const client = openAiClient({ maxRetries: 0, timeout: 90000 });
-  const instruction = `判斷同一隻 Pokémon GO 的兩張畫面是否色違。前兩張是不同時間的能力頁與評價頁；第三張是${reverse ? "色違" : "一般"}像素參考圖，第四張是${reverse ? "一般" : "色違"}像素參考圖。像素圖和遊戲 3D 外觀不完全相同，請比較身體配色。先檢查 CP 上方的色違標記區：只有該區完整入鏡且清楚時 iconAreaClear=true；CP 貼著截圖上緣就填 false。shinyIconVisible 只在實際看見色違圖示時 true。色違也可能有背景中的白色四角閃光；右上角五角最愛星、CP 弧線、葉子、氣泡、火花、暗影特效與光圈不是色違證據。只有兩張外觀清楚、身體配色符合一般而不符合色違、無四角閃光，並且一般與色違參考圖可明確區分或兩張都完整拍到且未見 CP 上方色違標記時，才判 normal。任何不確定都判 uncertain。不得輸出日期、地點或玩家資訊。`;
+  const instruction = `判斷同一隻 Pokémon GO 的兩張畫面是否色違。前兩張是不同時間的能力頁與評價頁；第三張是${reverse ? "色違" : "一般"}像素參考圖，第四張是${reverse ? "一般" : "色違"}像素參考圖。像素圖和遊戲 3D 外觀不完全相同，請比較身體配色；若有服裝或暗影紫色光環，只比較未遮擋的身體，遮擋太多就判 uncertain。先檢查 CP 上方的色違標記區：只有該區完整入鏡且清楚時 iconAreaClear=true；CP 貼著截圖上緣就填 false。shinyIconVisible 只在實際看見色違圖示時 true。色違也可能有背景中的白色四角閃光；右上角五角最愛星、CP 弧線、葉子、氣泡、火花、暗影特效與光圈不是色違證據。只有兩張外觀清楚、身體配色符合一般而不符合色違、無四角閃光，並且一般與色違參考圖可明確區分或兩張都完整拍到且未見 CP 上方色違標記時，才判 normal。任何不確定都判 uncertain。不得輸出日期、地點或玩家資訊。`;
   for (let attempt = 0; attempt < 3; attempt++) {
     signal.throwIfAborted();
     try {
@@ -219,16 +233,17 @@ async function judge(
 
 export async function reviewShiny(
   species: Species,
+  observedForm: string | null,
   topFile: string,
   appraisalFile: string,
   signal: AbortSignal,
   onUsage: (usage: { input: number; output: number; cached: boolean }) => void,
 ) {
-  const references = await cachedReferences(species);
+  const references = await cachedReferences(species, observedForm);
   if (!references) return null;
   const [top, appraisal] = await Promise.all([
-    upperImage(topFile),
-    upperImage(appraisalFile),
+    upperAppearanceImage(topFile),
+    upperAppearanceImage(appraisalFile),
   ]);
   if (!top || !appraisal) return null;
   const images: [Buffer, Buffer] = [top, appraisal];

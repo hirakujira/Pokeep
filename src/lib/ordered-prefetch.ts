@@ -55,3 +55,37 @@ export async function processPreparedInOrder<T, R>(input: {
     await Promise.allSettled([...pending.values()].map((task) => task.promise));
   }
 }
+
+/** Consume a growing, checkpointed source without blocking its producer. */
+export async function processGrowingInOrder<T, R>(input: {
+  list: () => T[];
+  startAfter: number;
+  needsPreparation: (item: T) => boolean;
+  active: () => boolean;
+  signal: AbortSignal;
+  prepare: (item: T, signal: AbortSignal) => Promise<R>;
+  consume: (item: T, result: R) => Promise<void>;
+  concurrency: number;
+  idleMs?: number;
+}): Promise<void> {
+  const active = () => !input.signal.aborted && input.active();
+  while (active()) {
+    const captured = input.list();
+    const pending = captured.length >= input.startAfter
+      ? captured.filter(input.needsPreparation)
+      : [];
+    if (pending.length) {
+      const finished = await processPreparedInOrder({
+        items: pending,
+        needsPreparation: input.needsPreparation,
+        active,
+        prepare: input.prepare,
+        consume: input.consume,
+        concurrency: input.concurrency,
+      });
+      if (!finished) return;
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, input.idleMs ?? 500));
+    }
+  }
+}

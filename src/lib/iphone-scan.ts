@@ -39,9 +39,11 @@ import {
   reconcilePageIssues,
   speciesGender,
   specialStateFromMoves,
+  requireSpecialCorroboration,
 } from "./iphone-safety";
-import { processPreparedInOrder } from "./ordered-prefetch";
+import { processGrowingInOrder, processPreparedInOrder } from "./ordered-prefetch";
 import { reviewShiny } from "./shiny-review";
+import { applySpecialVisualVerdict, reviewSpecialVisual } from "./special-visual-review";
 import { displayForm, uniqueFormFromStats } from "./iphone-form";
 
 type PhoneObservation = {
@@ -524,7 +526,9 @@ export async function captureOne(
       scanned: current.scanned + 1,
       currentFrame: top.frame,
       lastFingerprint: fingerprint,
-      stage: `已截圖 ${current.scanned + 1} 隻；完成截圖後開始解析`,
+      stage: current.scanned + 1 >= 20
+        ? `已截圖 ${current.scanned + 1} 隻；同步解析 ${current.analyzed || 0} 隻`
+        : `已截圖 ${current.scanned + 1} 隻；累積 20 隻後開始解析`,
     });
   });
   return dismissAppraisalForScan(phone, appraisal);
@@ -579,6 +583,7 @@ export async function analyzeOne(
   prepared?: Promise<PreparedAnalysis>,
   recheckExisting = false,
   shinyReview?: NonNullable<ScanItem["shinyReview"]>,
+  specialReview?: NonNullable<ScanItem["specialReview"]>,
 ) {
   if (item.pokemonId && !recheckExisting) return;
   if (!item.movesFrame || !item.appraisalFrame)
@@ -615,6 +620,9 @@ export async function analyzeOne(
     appraisalResult,
   ]);
   const fields = merged.fields;
+  requireSpecialCorroboration(fields, snapshot);
+  if (item.pokemonId && specialReview)
+    applySpecialVisualVerdict(fields, specialReview.verdict, snapshot);
   const moveState = specialStateFromMoves(fields);
   if (moveState.conflict)
     merged.issues.push("招式與暗影／淨化狀態衝突，請人工核對");
@@ -703,17 +711,17 @@ export async function analyzeOne(
     const shadowInferred =
       existing?.fields.shadow === null &&
       fields.shadow !== null &&
-      moveState.signal !== null &&
+      (moveState.signal !== null || specialReview?.verdict === "normal" || specialReview?.verdict === "shadow" || specialReview?.verdict === "purified") &&
       !moveState.conflict;
     const purifiedInferred =
       existing?.fields.purified === null &&
       fields.purified !== null &&
-      moveState.signal !== null &&
+      (moveState.signal !== null || specialReview?.verdict === "shadow" || specialReview?.verdict === "purified") &&
       !moveState.conflict;
     const speciesInferred =
       Boolean(
         existing &&
-          moveState.signal &&
+          (moveState.signal || specialReview?.verdict === "shadow") &&
           !moveState.conflict &&
           existing.fields.speciesId !== fields.speciesId &&
           existing.fields.speciesId?.replace(/_shadow$/, "") ===
@@ -757,6 +765,7 @@ export async function analyzeOne(
             ...item,
             fields,
             shinyReview: shinyReview || item.shinyReview,
+            specialReview: specialReview || item.specialReview,
           });
         if (verified)
           updateScan(scanId, { review: Math.max(0, current.review - 1) });
@@ -830,11 +839,14 @@ export async function analyzeOne(
       evolutionSilhouette,
       maxStatus,
       favoriteRechecked: true,
+      analyzedAt: now(),
     });
     updateScan(scanId, {
       analyzed: (current.analyzed || 0) + 1,
       review: current.review + Number(!pokemon.verified),
-      stage: `已解析 ${(current.analyzed || 0) + 1} / ${current.scanned} 隻`,
+      stage: current.phase === "analysis"
+        ? `已解析 ${(current.analyzed || 0) + 1} / ${current.scanned} 隻`
+        : `已截圖 ${current.scanned} 隻；同步解析 ${(current.analyzed || 0) + 1} 隻`,
     });
   });
 }
@@ -896,10 +908,140 @@ async function recheckFavoriteRecords(scanId: string) {
   return true;
 }
 
+/** Apply saved two-frame ordinary appearance without re-running OCR or touching the phone. */
+export function applyStoredNormalShadowReviews(scanId: string) {
+  let changed = 0;
+  for (const item of scanItems(scanId)) {
+    if (item.specialReview?.verdict !== "normal" || !item.pokemonId || !item.fields)
+      continue;
+    transaction(() => {
+      const record = get<Pokemon>("pokemon", item.pokemonId!);
+      if (
+        !record || record.jobId !== scanId || record.verified ||
+        record.verification === "human" || record.candidates.length ||
+        record.issues.length || Object.keys(record.overrides).length ||
+        record.fields.shadow !== null || record.fields.purified !== null ||
+        !isDeepStrictEqual(item.fields, record.fields)
+      ) return;
+      const fields = { ...record.fields };
+      applySpecialVisualVerdict(fields, "normal", null);
+      if (fields.shadow !== false || fields.purified !== null) return;
+      put("pokemon", record.id, { ...record, fields, updatedAt: now() });
+      put("scan_items", item.id, { ...item, fields });
+      changed++;
+    });
+  }
+  if (changed) reevaluate();
+  return changed;
+}
+
+/** Copy a conclusive saved shiny verdict when it is the only field drift. */
+export function applyStoredShinyReviews(scanId: string) {
+  let changed = 0;
+  for (const item of scanItems(scanId)) {
+    const verdict = item.shinyReview?.verdict;
+    if ((verdict !== "normal" && verdict !== "shiny") || !item.pokemonId || !item.fields)
+      continue;
+    transaction(() => {
+      const record = get<Pokemon>("pokemon", item.pokemonId!);
+      if (
+        !record || record.jobId !== scanId || record.verified ||
+        record.verification === "human" || record.candidates.length ||
+        record.issues.length || Object.keys(record.overrides).length ||
+        record.fields.shiny !== null
+      ) return;
+      const shiny = verdict === "shiny";
+      if (item.fields!.shiny !== null && item.fields!.shiny !== shiny) return;
+      if (!isDeepStrictEqual(
+        { ...item.fields, shiny: record.fields.shiny }, record.fields,
+      )) return;
+      const fields = { ...record.fields, shiny };
+      put("pokemon", record.id, { ...record, fields, updatedAt: now() });
+      put("scan_items", item.id, { ...item, fields });
+      changed++;
+    });
+  }
+  if (changed) reevaluate();
+  return changed;
+}
+
+/** Recheck visible special effects in two saved moments; never touch the phone. */
+export async function reviewUnknownSpecialStates(
+  scanId: string,
+  allowCompleted = false,
+) {
+  const active = () => {
+    const status = get<Scan>("scans", scanId)?.status;
+    return status === "running" || (allowCompleted && status === "completed");
+  };
+  const candidates = scanItems(scanId).filter((item) => {
+    if (item.specialReview || !item.pokemonId || !item.appraisalFrame) return false;
+    const record = get<Pokemon>("pokemon", item.pokemonId);
+    return Boolean(
+      record && !record.verified && !record.candidates.length &&
+      !record.issues.length && !Object.keys(record.overrides).length &&
+      record.fields.costume === null &&
+      specialStateFromMoves(record.fields).signal === null &&
+      !specialStateFromMoves(record.fields).conflict &&
+      record.fields.shadow === null && record.fields.purified === null,
+    );
+  });
+  let processed = 0;
+  const finished = await processPreparedInOrder({
+    items: candidates,
+    needsPreparation: () => true,
+    active,
+    prepare: async (item, signal) => {
+      try {
+        return await reviewSpecialVisual(
+          path.join(dataDir, "frames", item.frame),
+          path.join(dataDir, "frames", item.appraisalFrame!),
+          signal,
+          (usage) => recordAnalysisUsage(scanId, usage),
+        );
+      } catch {
+        return null;
+      }
+    },
+    consume: async (item, result) => {
+      processed++;
+      updateScan(scanId, {
+        stage: `比對已存畫面的暗影與淨化狀態 ${processed} / ${candidates.length} 隻`,
+      });
+      if (!result) return;
+      const proof: NonNullable<ScanItem["specialReview"]> = {
+        ...result,
+        reviewedAt: now(),
+      };
+      if (proof.verdict === "shadow" || proof.verdict === "purified") {
+        try {
+          await analyzeOne(scanId, item, undefined, true, undefined, proof);
+        } catch {
+          // Keep the proof, but leave the record pending if other fields changed.
+        }
+      }
+      const latest = get<ScanItem>("scan_items", item.id);
+      if (latest) put("scan_items", item.id, { ...latest, specialReview: proof });
+    },
+    concurrency: 2,
+  });
+  applyStoredNormalShadowReviews(scanId);
+  const review = scanItems(scanId).filter((item) => {
+    const record = item.pokemonId ? get<Pokemon>("pokemon", item.pokemonId) : null;
+    return record && !record.verified;
+  }).length;
+  updateScan(scanId, { review });
+  reevaluate();
+  if (allowCompleted && get<Scan>("scans", scanId)?.status === "completed")
+    updateScan(scanId, { stage: "截圖與解析完成，請檢查放生候選" });
+  return finished;
+}
+
 /** Use two already saved moments and exact variant references; never touch the phone. */
 export async function reviewUnknownShiny(
   scanId: string,
   allowCompleted = false,
+  retryUncertain = false,
 ) {
   const active = () => {
     const status = get<Scan>("scans", scanId)?.status;
@@ -908,7 +1050,8 @@ export async function reviewUnknownShiny(
   const snapshot = getSnapshot();
   if (!snapshot) return true;
   const candidates = scanItems(scanId).filter((item) => {
-    if (item.shinyReview || !item.pokemonId || !item.appraisalFrame) return false;
+    if ((item.shinyReview && !(retryUncertain && item.shinyReview.verdict === "uncertain")) ||
+        !item.pokemonId || !item.appraisalFrame) return false;
     const record = get<Pokemon>("pokemon", item.pokemonId);
     const fields = record?.fields;
     return Boolean(
@@ -918,8 +1061,6 @@ export async function reviewUnknownShiny(
       !record.issues.length &&
       !Object.keys(record.overrides).length &&
       fields?.shiny === null &&
-      fields.shadow === false &&
-      fields.costume === null &&
       fields.speciesId &&
       snapshot.species[fields.speciesId],
     );
@@ -936,6 +1077,7 @@ export async function reviewUnknownShiny(
       try {
         return await reviewShiny(
           species,
+          record?.fields.form ?? null,
           path.join(dataDir, "frames", item.frame),
           path.join(dataDir, "frames", item.appraisalFrame),
           signal,
@@ -965,8 +1107,12 @@ export async function reviewUnknownShiny(
       const latest = get<ScanItem>("scan_items", item.id);
       if (latest) put("scan_items", item.id, { ...latest, shinyReview: proof });
     },
-    concurrency: getRuntimeConfig().shinyReviewConcurrency,
+    concurrency: allowCompleted
+      ? Math.min(2, getRuntimeConfig().shinyReviewConcurrency)
+      : getRuntimeConfig().shinyReviewConcurrency,
   });
+  applyStoredShinyReviews(scanId);
+  applyStoredNormalShadowReviews(scanId);
   const review = scanItems(scanId).filter((item) => {
     const record = item.pokemonId ? get<Pokemon>("pokemon", item.pokemonId) : null;
     return record && !record.verified;
@@ -999,10 +1145,12 @@ export async function analyzeScan(scanId: string) {
   reevaluate();
   if (!finished) return;
   if (!(await recheckFavoriteRecords(scanId))) return;
+  if (!(await reviewUnknownSpecialStates(scanId))) return;
   if (!(await reviewUnknownShiny(scanId))) return;
   if (get<Scan>("scans", scanId)?.status === "running")
     updateScan(scanId, {
       status: "completed",
+      completedAt: now(),
       analyzed: items.length,
       stage: "截圖與解析完成，請檢查放生候選",
       error: null,
@@ -1059,30 +1207,58 @@ export async function runScan(phone: IphoneMcp, initial: Scan) {
     });
     current = await tapInitialTarget(phone, current, "first_pokemon");
   }
-  while (true) {
-    scan = get<Scan>("scans", scan.id)!;
-    if (scan.status !== "running") return;
-    if (scan.expected !== null && scan.scanned >= scan.expected) break;
-    if (
-      scan.expected === null &&
-      scan.scanned > 0 &&
-      scan.scanned % 100 === 0
-    ) {
-      updateScan(scan.id, {
-        status: "paused",
-        stage: `已截圖 ${scan.scanned} 隻；請確認範圍後繼續`,
-        checkpointRequired: true,
-      });
-      return;
+  const pipelineStop = new AbortController();
+  let pipeline: Promise<void> | null = null;
+  let pipelineError: string | null = null;
+  const startPipeline = () => {
+    if (pipeline || scan.scanned < 20) return;
+    pipeline = processGrowingInOrder({
+      list: () => scanItems(scan.id),
+      startAfter: 20,
+      needsPreparation: (item) => !item.pokemonId,
+      active: () => get<Scan>("scans", scan.id)?.status === "running",
+      signal: pipelineStop.signal,
+      prepare: (item, signal) => prepareAnalysis(scan.id, item, signal),
+      consume: (item, result) => analyzeOne(scan.id, item, Promise.resolve(result)),
+      // Phone capture has priority; use fewer AI requests until it finishes.
+      concurrency: Math.min(2, getRuntimeConfig().analysisConcurrency),
+    }).catch((error) => {
+      pipelineError = error instanceof Error ? error.message : "背景解析失敗";
+    });
+  };
+  startPipeline();
+  try {
+    while (true) {
+      scan = get<Scan>("scans", scan.id)!;
+      if (scan.status !== "running") return;
+      if (scan.expected !== null && scan.scanned >= scan.expected) break;
+      if (
+        scan.expected === null &&
+        scan.scanned > 0 &&
+        scan.scanned % 100 === 0
+      ) {
+        updateScan(scan.id, {
+          status: "paused",
+          stage: `已截圖 ${scan.scanned} 隻；請確認範圍後繼續`,
+          checkpointRequired: true,
+        });
+        return;
+      }
+      current = await captureOne(phone, scan, current);
+      scan = get<Scan>("scans", scan.id)!;
+      startPipeline();
+      if (scan.expected !== null && scan.scanned >= scan.expected) break;
+      current = await swipeScan(phone, current, "left");
     }
-    current = await captureOne(phone, scan, current);
-    scan = get<Scan>("scans", scan.id)!;
-    if (scan.expected !== null && scan.scanned >= scan.expected) break;
-    current = await swipeScan(phone, current, "left");
+  } finally {
+    pipelineStop.abort();
+    await pipeline;
   }
   updateScan(scan.id, {
     phase: "analysis",
-    stage: "截圖完成，開始解析",
+    stage: pipelineError
+      ? "截圖完成，重試先前失敗的解析"
+      : "截圖完成，解析剩餘畫面",
   });
   await analyzeScan(scan.id);
 }

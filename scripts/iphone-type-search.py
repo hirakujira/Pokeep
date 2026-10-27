@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send only Pokékeep's box search strings through the existing iPhone Use WDA.
+"""Send only Pokéep's box search strings through the existing iPhone Use WDA.
 
 Pokémon GO exposes no editable search field to pua_type_text, even when its
 keyboard is open. WDA's keyboard endpoint accepts Unicode text. This helper
@@ -8,6 +8,7 @@ shares iPhone Use's operation lock and never accepts a general phone command.
 
 import fcntl
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -16,9 +17,19 @@ import sys
 def main():
     payload = json.loads(sys.stdin.readline())
     query = payload.get("query")
-    match = re.fullmatch(r"([1-9][0-9]{0,4})(?:&!?背卡)?", query or "")
+    match = re.fullmatch(r"([1-9][0-9]{0,4})(.*)", query or "")
     if not match or int(match.group(1)) > 10000:
-        raise ValueError("僅允許圖鑑編號或圖鑑編號與背卡搜尋")
+        raise ValueError("僅允許圖鑑編號與已核准的放生搜尋條件")
+    suffix = match.group(2)
+    terms = ["背卡", "亮晶晶", "異色", "特殊", "暗影", "淨化", "我的最愛", "傳說", "幻", "究極異獸", "4*"]
+    if suffix not in ("", "&背卡"):
+        selected = suffix.split("&!")
+        if selected[0] != "" or len(selected) < 2 or len(set(selected[1:])) != len(selected[1:]):
+            raise ValueError("額外搜尋條件最多兩項且不能重複")
+        if len([term for term in selected[1:] if term != "背卡"]) > 2:
+            raise ValueError("額外搜尋條件最多兩項")
+        if any(term not in terms for term in selected[1:]) or selected[1:] != sorted(selected[1:], key=terms.index):
+            raise ValueError("不支援的放生搜尋條件順序")
 
     root = Path(sys.argv[1])
     sys.path.insert(0, str(root / "server"))

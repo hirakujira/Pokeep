@@ -28,3 +28,20 @@ export function resumableTransferIndexes(batch: TransferBatch): number[] {
     entry.status === "pending" || index === retry ? [index] : [],
   );
 }
+
+/** The failed entry may be left behind only when no transfer tap was sent. */
+export function skippableTransferIndex(batch: TransferBatch): number | null {
+  if (batch.status !== "paused" || batch.mode !== "bulk" || !batch.error ||
+      !batch.entries.some((entry) => entry.status === "pending") ||
+      batch.entries.some((entry) =>
+        ["searching", "unfavoriting", "prepared", "sent", "uncertain"].includes(entry.status),
+      )) return null;
+  for (let index = batch.entries.length - 1; index >= 0; index--) {
+    const entry = batch.entries[index];
+    if (entry.status === "skipped" && entry.reason === batch.error &&
+        !entry.sentAt && !entry.submittedAt && !entry.confirmedAt &&
+        batch.entries.slice(index + 1).every((later) => later.status === "pending"))
+      return index;
+  }
+  return null;
+}

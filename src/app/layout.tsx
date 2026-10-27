@@ -10,7 +10,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pokékeep｜iPhone 自動掃描與清倉助手",
+  title: "Pokéep｜iPhone 自動掃描與清倉助手",
   description:
     "透過 iPhone Use 掃描 Pokémon GO 收藏，依據團體戰與 PvP 價值，核對並整理寶可夢盒子。",
 };

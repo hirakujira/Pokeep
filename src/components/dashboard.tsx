@@ -41,9 +41,18 @@ import {
   type Cost,
 } from "@/lib/types";
 import type { Scan, TransferBatch } from "@/lib/iphone-types";
+import type { ScanTiming } from "@/lib/scan-timing";
 import type { PublicRuntimeConfig } from "@/lib/runtime-config";
-import { resumableTransferIndexes } from "@/lib/iphone-resume";
+import { resumableTransferIndexes, skippableTransferIndex } from "@/lib/iphone-resume";
+import {
+  defaultTransferSearchFilters,
+  maxExtraTransferSearchFilters,
+  transferSearchFilters,
+  transferSearchQuery,
+  type TransferSearchFilter,
+} from "@/lib/transfer-search-filters";
 import { localizeMoveText, moveName } from "@/lib/move-names";
+import { localizeSpeciesName } from "@/lib/species-names";
 import { typeName } from "@/lib/type-names";
 
 type SnapshotInfo = {
@@ -74,7 +83,7 @@ type PhoneState = {
     message: string;
     version: string | null;
   } | null;
-  scan: Scan | null;
+  scan: (Scan & { timing?: ScanTiming }) | null;
   batch: TransferBatch | null;
   resumableBatches: (TransferBatch & { resumeBlocked: string | null })[];
 };
@@ -134,6 +143,14 @@ const date = (v: string) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+const duration = (ms: number | null) => {
+  if (ms === null || !Number.isFinite(ms)) return "資料不足";
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分 ${seconds % 60} 秒`;
+  return `${Math.floor(minutes / 60)} 小時 ${minutes % 60} 分`;
+};
 const sourceTime = (source: Evidence) =>
   source.source === "iphone"
     ? source.capturedAt
@@ -150,8 +167,12 @@ const speciesLabel = (
   if (!speciesId) return "尚未指定物種";
   const species = catalog.species.find((row) => row.id === speciesId);
   return species
-    ? `#${species.dex} ${species.name}`
-    : fallbackName || "圖鑑資料載入中";
+    ? `#${species.dex} ${localizeSpeciesName(species.name, species.id)}`
+    : fallbackName ? localizeSpeciesName(fallbackName, speciesId) : "圖鑑資料載入中";
+};
+const displayPokemonName = (name: string, costume: string | null, speciesId?: string | null) => {
+  const localized = localizeSpeciesName(name, speciesId);
+  return costume && !localized.includes(costume) ? `${localized}（${costume}）` : localized;
 };
 async function api<T = unknown>(
   url: string,
@@ -196,7 +217,7 @@ function Logo() {
       <span className="brand-symbol" aria-hidden="true">
         <i />
       </span>
-      Pokékeep
+      Pokéep
     </div>
   );
 }
@@ -253,7 +274,28 @@ export default function Dashboard() {
     [sort, setSort] = useState("recent"),
     [selected, setSelected] = useState<string | null>(null),
     [checkedTransfers, setCheckedTransfers] = useState<string[]>([]),
+    [searchExclusions, setSearchExclusions] = useState<TransferSearchFilter[]>(defaultTransferSearchFilters),
     [showArchived, setShowArchived] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("pokeep-transfer-search-exclusions") || "null");
+      if (!Array.isArray(saved)) return;
+      transferSearchQuery(25, saved);
+      setSearchExclusions(saved);
+    } catch { /* Keep the safe default. */ }
+  }, []);
+  const toggleSearchExclusion = (id: TransferSearchFilter) => {
+    const next = searchExclusions.includes(id)
+      ? searchExclusions.filter((entry) => entry !== id)
+      : [...searchExclusions, id];
+    try {
+      transferSearchQuery(25, next);
+      setSearchExclusions(next);
+      localStorage.setItem("pokeep-transfer-search-exclusions", JSON.stringify(next));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "搜尋條件無效");
+    }
+  };
   const closeDrawer = useCallback(() => setSelected(null), []);
   const backupInput = useRef<HTMLInputElement>(null);
   const refresh = useCallback(async () => {
@@ -314,20 +356,25 @@ export default function Dashboard() {
     await act(label, fn);
     await refreshPhone();
   };
-  const startSingleTransfer = (pokemonId: string) => {
-    void phoneAct("execute-one", async () => {
-      const batch = await api<TransferBatch>("transfers/execute-one", "POST", { pokemonId });
-      setTrackedBatchId(batch.id);
-      setDismissedBatchId(null);
-      notify("已開始放生");
-    });
-  };
   const startSelectedTransfers = (pokemonIds: string[]) => {
     void phoneAct("execute-many", async () => {
-      const batch = await api<TransferBatch>("transfers/execute-many", "POST", { pokemonIds });
+      const batch = await api<TransferBatch>("transfers/execute-many", "POST", {
+        pokemonIds, searchExclusions,
+      });
       setTrackedBatchId(batch.id);
       setDismissedBatchId(null);
       notify(`已開始放生 ${pokemonIds.length} 隻`);
+    });
+  };
+  const skipTransferEntry = (pausedBatch: TransferBatch) => {
+    void phoneAct("skip-transfer-entry", async () => {
+      const skipped = await api<TransferBatch>(`transfers/${pausedBatch.id}/skip-current`, "POST");
+      setTrackedBatchId(skipped.id);
+      setDismissedBatchId(null);
+      const newlyExcluded = skipped.entries.filter((entry, index) =>
+        pausedBatch.entries[index]?.status === "pending" && entry.status === "skipped",
+      ).length;
+      notify(`已跳過這隻${newlyExcluded ? `，另有 ${newlyExcluded} 隻不再符合放生條件也已跳過` : ""}；繼續放生剩餘 ${skipped.entries.filter((entry) => entry.status === "pending").length} 隻`);
     });
   };
   const navigate = (next: Tab) => {
@@ -352,7 +399,7 @@ export default function Dashboard() {
         (showArchived || p.owned) &&
         (filter === "all" || p.analysis?.category === filter) &&
         (query === "" ||
-          `${effective(p).name || ""} ${effective(p).speciesId || ""} ${catalog.species.find((s) => s.id === effective(p).speciesId)?.dex || ""} ${effective(p).cp || ""}`
+          `${effective(p).name || ""} ${effective(p).costume || ""} ${effective(p).speciesId || ""} ${catalog.species.find((s) => s.id === effective(p).speciesId)?.dex || ""} ${effective(p).cp || ""}`
             .toLowerCase()
             .includes(query.toLowerCase())),
     )
@@ -397,6 +444,9 @@ export default function Dashboard() {
   const chosen = selected ? state.pokemon.find((p) => p.id === selected) : null;
   const batch = phoneState?.batch;
   const batchResumableCount = batch ? resumableTransferIndexes(batch).length : 0;
+  const batchSkippableIndex = batch ? skippableTransferIndex(batch) : null;
+  const batchSkippablePokemon = batchSkippableIndex === null ? null :
+    state.pokemon.find((pokemon) => pokemon.id === batch!.entries[batchSkippableIndex].pokemonId);
   const batchProcessed = batch?.entries.filter((entry) =>
     ["submitted", "confirmed", "skipped", "uncertain"].includes(entry.status),
   ).length || 0;
@@ -674,6 +724,20 @@ export default function Dashboard() {
                         : `預計 ${phoneState.scan.expected} 隻`}
                     </span>
                     <span>{phoneState.scan.review} 隻待人工核對</span>
+                    {phoneState.scan.timing && (
+                      <>
+                        <span>平均每隻（{phoneState.scan.timing.phase === "capture" ? "截圖" : "解析"}）：{duration(phoneState.scan.timing.averageMs)}</span>
+                        <span>已用時間（含暫停）：{duration(phoneState.scan.timing.elapsedMs)}</span>
+                        <span>預計剩餘（{phoneState.scan.timing.phase === "capture" ? "截圖" : "解析"}）：{
+                          phoneState.scan.status === "paused" ? "暫停中" :
+                          phoneState.scan.status === "completed" ? "已完成" :
+                          phoneState.scan.status === "stopped" ? "已停止" :
+                          phoneState.scan.timing.phase === "capture" && phoneState.scan.expected === null
+                            ? "總數未知"
+                            : duration(phoneState.scan.timing.remainingMs)
+                        }</span>
+                      </>
+                    )}
                     {phoneState.scan.apiUsage.navigationRequests === undefined &&
                     phoneState.scan.apiUsage.dataRequests === undefined ? (
                       <span>
@@ -686,6 +750,9 @@ export default function Dashboard() {
                       </>
                     )}
                   </div>
+                  {phoneState.scan.timing && (
+                    <p className="caption">剩餘時間依近期每隻速度估算，截圖與解析分階段計算；長時間暫停不列入平均。</p>
+                  )}
                   <p className="muted">
                     範圍：
                     {phoneState.scan.scope === "all"
@@ -829,9 +896,19 @@ export default function Dashboard() {
                   <p className="muted">
                     已處理 {batchProcessed} / {batch.entries.length} 隻 · 跳過 {batchSkipped} 隻
                   </p>
+                  <p className="muted">
+                    手機搜尋排除：{(batch.searchExclusions || defaultTransferSearchFilters)
+                      .map((id) => transferSearchFilters.find((option) => option.id === id)?.label)
+                      .filter(Boolean).join("、") || "未選"}
+                  </p>
                   {batch.error && <p className="job-error">{batch.error}</p>}
                   {batchResumableCount > 0 && (
                     <p className="muted">先在手機返回寶可夢盒子列表，再按「繼續」；已送出的個體不會重送。</p>
+                  )}
+                  {batchSkippableIndex !== null && (
+                    <p className="muted">
+                      可跳過 {batchSkippablePokemon ? `${effective(batchSkippablePokemon).name || "這隻寶可夢"} · CP ${effective(batchSkippablePokemon).cp ?? "?"}` : "這隻寶可夢"}；它會維持持有，不會再由此批次放生。
+                    </p>
                   )}
                   <details>
                     <summary>查看逐隻紀錄</summary>
@@ -849,7 +926,7 @@ export default function Dashboard() {
                               />
                             )}
                             <div>
-                              <strong>{f.name || f.speciesId} · CP {f.cp ?? "?"}</strong>
+                              <strong>{displayPokemonName(f.name || f.speciesId || "寶可夢", f.costume, f.speciesId)} · CP {f.cp ?? "?"}</strong>
                               <small>{entryStatusLabels[entry.status]}</small>
                               {entry.reason && <small>{entry.reason}</small>}
                             </div>
@@ -861,6 +938,15 @@ export default function Dashboard() {
                       })}
                     </div>
                   </details>
+                  {batchSkippableIndex !== null && (
+                    <button
+                      className="button secondary"
+                      disabled={!!busy}
+                      onClick={() => skipTransferEntry(batch)}
+                    >
+                      跳過這隻並繼續
+                    </button>
+                  )}
                   {batchResumableCount > 0 && (
                     <button
                       className="button"
@@ -899,6 +985,15 @@ export default function Dashboard() {
                   {phoneState.resumableBatches.filter((row) => row.id !== batch?.id).map((row) => (
                     <div className="iphone-candidate" key={row.id}>
                       <span>已處理 {row.entries.filter((entry) => ["submitted", "confirmed", "skipped", "uncertain"].includes(entry.status)).length}/{row.entries.length} · {row.resumeBlocked || row.error}</span>
+                      {skippableTransferIndex(row) !== null && (
+                        <button
+                          className="button small secondary"
+                          disabled={!!busy || !!row.resumeBlocked || ["approved", "running"].includes(batch?.status || "")}
+                          onClick={() => skipTransferEntry(row)}
+                        >
+                          跳過這隻並繼續
+                        </button>
+                      )}
                       <button
                         className="button small"
                         disabled={!!busy || !!row.resumeBlocked || ["approved", "running"].includes(batch?.status || "")}
@@ -953,7 +1048,7 @@ export default function Dashboard() {
                     <input
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
-                      placeholder="搜尋名稱、全國圖鑑編號或 CP"
+                      placeholder="搜尋名稱、造型、全國圖鑑編號或 CP"
                     />
                   </label>
                   <div className="list-controls">
@@ -984,6 +1079,28 @@ export default function Dashboard() {
                     </a>
                   </div>
                 </div>
+                {tab === "results" && (
+                  <div className="transfer-search-options">
+                    <strong>放生時手機搜尋排除</strong>
+                    <div className="transfer-search-checks">
+                      {transferSearchFilters.map((option) => (
+                        <label key={option.id} className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={searchExclusions.includes(option.id)}
+                            disabled={!!busy || ["approved", "running"].includes(batch?.status || "") ||
+                              (option.id !== "background" && !searchExclusions.includes(option.id) &&
+                                searchExclusions.filter((id) => id !== "background").length >= maxExtraTransferSearchFilters)}
+                            onChange={() => toggleSearchExclusion(option.id)}
+                          />
+                          {option.label}
+                        </label>
+                      ))}
+                    </div>
+                    <small>額外最多選兩項，避免手機搜尋字串超出可核對範圍。未勾背卡時仍會另行檢查並跳過背卡個體。</small>
+                    <code>範例：{transferSearchQuery(25, searchExclusions)}</code>
+                  </div>
+                )}
                 {tab === "results" && (
                   <div className="transfer-selection-bar">
                     <span>
@@ -1039,6 +1156,11 @@ export default function Dashboard() {
                       <tbody>
                         {list.map((p) => {
                           const f = effective(p);
+                          const name = displayPokemonName(
+                            f.name || catalog.species.find((s) => s.id === f.speciesId)?.name || "待辨識個體",
+                            f.costume,
+                            f.speciesId,
+                          );
                           const retainedEvolution = p.analysis?.category === "transfer" && f.speciesId
                             ? (p.analysis.comparedWith
                                 .map((id) => pokemonById.get(id))
@@ -1065,7 +1187,7 @@ export default function Dashboard() {
                                   {p.owned && p.analysis?.category === "transfer" && (
                                     <input
                                       type="checkbox"
-                                      aria-label={`勾選 ${f.name || f.speciesId || "寶可夢"} CP ${f.cp ?? "未知"}`}
+                                      aria-label={`勾選 ${name} CP ${f.cp ?? "未知"}`}
                                       checked={activeCheckedTransfers.includes(p.id)}
                                       onClick={(event) => event.stopPropagation()}
                                       onKeyDown={(event) => event.stopPropagation()}
@@ -1079,11 +1201,7 @@ export default function Dashboard() {
                                   <PokemonSprite pokemon={p} />
                                   <div>
                                     <strong>
-                                      {f.name ||
-                                        catalog.species.find(
-                                          (s) => s.id === f.speciesId,
-                                        )?.name ||
-                                        "待辨識個體"}
+                                      <span className="pokemon-display-name">{name}</span>
                                       {f.shiny && <Sparkles size={12} />}
                                       {p.maxStatus === "dynamax" && " · 極巨化"}
                                       {p.maxStatus === "gigantamax" && " · 超極巨化"}
@@ -1148,7 +1266,7 @@ export default function Dashboard() {
                                 )}
                               </td>
                               <td className="reason-cell">
-                                {localizeMoveText(p.analysis?.reasons[0] || "等待分析", moveNames)}
+                                {localizeSpeciesName(localizeMoveText(p.analysis?.reasons[0] || "等待分析", moveNames))}
                                 <small>{p.sources.length} 張來源畫面</small>
                               </td>
                               <td>
@@ -1164,24 +1282,6 @@ export default function Dashboard() {
                                 </span>
                               </td>
                               <td>
-                                {p.owned && p.analysis?.category === "transfer" && (
-                                  <button
-                                    className="button small danger-outline"
-                                    disabled={
-                                      !!busy ||
-                                      ["approved", "running"].includes(
-                                        phoneState?.batch?.status || "",
-                                      )
-                                    }
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      startSingleTransfer(p.id);
-                                    }}
-                                    onKeyDown={(event) => event.stopPropagation()}
-                                  >
-                                    放生
-                                  </button>
-                                )}
                                 <ChevronRight size={17} />
                               </td>
                             </tr>
@@ -1247,7 +1347,7 @@ export default function Dashboard() {
               {state.snapshot
                 ? `遊戲資料 ${state.snapshot.sourceDate.split(" ")[0]} · ${number(state.snapshot.count)} 種物種／形態`
                 : "尚未載入遊戲資料"}
-              <span className="footer-dot">·</span>Pokékeep v0.1
+              <span className="footer-dot">·</span>Pokéep v0.1
             </span>
           </footer>
         </main>
@@ -1271,17 +1371,28 @@ export default function Dashboard() {
               停止
             </button>
           ) : batchResumableCount > 0 ? (
-            <button
-              className="transfer-toast-button"
-              disabled={!!busy}
-              onClick={() => void phoneAct("resume-transfer", async () => {
-                const resumed = await api<TransferBatch>(`transfers/${batch.id}/resume`, "POST");
-                setTrackedBatchId(resumed.id);
-                setDismissedBatchId(null);
-              })}
-            >
-              繼續
-            </button>
+            <>
+              {batchSkippableIndex !== null && (
+                <button
+                  className="transfer-toast-button"
+                  disabled={!!busy}
+                  onClick={() => skipTransferEntry(batch)}
+                >
+                  跳過這隻並繼續
+                </button>
+              )}
+              <button
+                className="transfer-toast-button"
+                disabled={!!busy}
+                onClick={() => void phoneAct("resume-transfer", async () => {
+                  const resumed = await api<TransferBatch>(`transfers/${batch.id}/resume`, "POST");
+                  setTrackedBatchId(resumed.id);
+                  setDismissedBatchId(null);
+                })}
+              >
+                繼續
+              </button>
+            </>
           ) : (
             <button className="transfer-toast-button" onClick={() => setDismissedBatchId(batch.id)}>
               關閉
@@ -1660,9 +1771,10 @@ function PokemonDrawer({
 }) {
   const [section, setSection] = useState("review"),
     [fields, setFields] = useState<Fields>(effective(p)),
+    [speciesQuery, setSpeciesQuery] = useState(""),
     [source, setSource] = useState(0),
     [verified, setVerified] = useState(p.verified),
-    [evolutionSilhouette, setEvolutionSilhouette] = useState<boolean | null>(
+    [evolutionSilhouette, setEvolutionSilhouette] = useState<boolean | "unavailable" | "unknown-branch" | null>(
       p.evolutionSilhouette ?? null,
     ),
     [maxStatus, setMaxStatus] = useState<Pokemon["maxStatus"]>(
@@ -1674,6 +1786,7 @@ function PokemonDrawer({
     panelRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setFields(effective(p));
+    setSpeciesQuery("");
     setVerified(p.verified);
     setEvolutionSilhouette(p.evolutionSilhouette ?? null);
     setMaxStatus(p.maxStatus ?? null);
@@ -1730,38 +1843,63 @@ function PokemonDrawer({
     const bool = ["shadow", "purified", "shiny", "favorite"].includes(key),
       text = ["name", "form", "costume"].includes(key),
       moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key);
+    if (key === "speciesId") {
+      const query = speciesQuery.trim().replace(/^#/, "").toLocaleLowerCase();
+      const matches = catalog.species.filter((s) =>
+        !query || String(s.dex).includes(query) ||
+        s.name.toLocaleLowerCase().includes(query) ||
+        localizeSpeciesName(s.name, s.id).toLocaleLowerCase().includes(query) ||
+        s.id.toLocaleLowerCase().includes(query));
+      const options = fields.speciesId && !matches.some((s) => s.id === fields.speciesId)
+        ? [...catalog.species.filter((s) => s.id === fields.speciesId), ...matches]
+        : matches;
+      return (
+        <div className="edit-field" key={key}>
+          <span>
+            {fieldLabels[key]}
+            {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
+          </span>
+          <input
+            aria-label="搜尋物種"
+            value={speciesQuery}
+            placeholder="搜尋中文名稱、圖鑑編號或英文 ID"
+            onChange={(e) => setSpeciesQuery(e.target.value)}
+          />
+          <select
+            aria-label="物種／形態"
+            value={fields.speciesId || ""}
+            onChange={(e) => {
+              const s = catalog.species.find((row) => row.id === e.target.value);
+              setFields((f) => ({
+                ...f,
+                speciesId: e.target.value || null,
+                ...(s ? {
+                  shadow: s.id.endsWith("_shadow"),
+                  name: f.name || s.name.split(" ")[0],
+                } : {}),
+              }));
+              setVerified(false);
+            }}
+          >
+            <option value="">選擇物種／形態</option>
+            {options.map((s) => (
+              <option key={s.id} value={s.id}>
+                #{s.dex} {localizeSpeciesName(s.name, s.id)}
+              </option>
+            ))}
+          </select>
+          <small>{query ? `找到 ${matches.length} 種物種／形態` :
+            `${catalog.species.length} 種物種／形態`}</small>
+        </div>
+      );
+    }
     return (
       <label className="edit-field" key={key}>
         <span>
           {fieldLabels[key]}
           {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
         </span>
-        {key === "speciesId" ? (
-          <select
-            value={fields.speciesId || ""}
-            onChange={(e) => {
-              const s = catalog.species.find((s) => s.id === e.target.value);
-              setFields((f) => ({
-                ...f,
-                speciesId: e.target.value || null,
-                ...(s
-                  ? {
-                      shadow: s.id.endsWith("_shadow"),
-                      name: f.name || s.name.split(" ")[0],
-                    }
-                  : {}),
-              }));
-              setVerified(false);
-            }}
-          >
-            <option value="">選擇物種／形態</option>
-            {catalog.species.map((s) => (
-              <option key={s.id} value={s.id}>
-                #{s.dex} {s.name}
-              </option>
-            ))}
-          </select>
-        ) : bool ? (
+        {bool ? (
           <select
             value={fields[key] === null ? "" : String(fields[key])}
             onChange={(e) =>
@@ -1840,7 +1978,7 @@ function PokemonDrawer({
         <div className="drawer-heading">
           <div>
             <h2 id="drawer-title">
-              {fields.name || "待辨識個體"}
+              {displayPokemonName(fields.name || "待辨識個體", fields.costume, fields.speciesId)}
               <Status category={a?.category || "review"} />
             </h2>
             <p>
@@ -1992,7 +2130,7 @@ function PokemonDrawer({
                     ] as (keyof Fields)[]
                   ).map(editor)}
                   <label className="edit-field">
-                    <span>進化按鈕剪影</span>
+                    <span>進化按鈕狀態</span>
                     <select
                       value={
                         evolutionSilhouette === null
@@ -2003,15 +2141,21 @@ function PokemonDrawer({
                         setEvolutionSilhouette(
                           event.target.value === ""
                             ? null
-                            : event.target.value === "true",
+                            : event.target.value === "unavailable"
+                              ? "unavailable"
+                              : event.target.value === "unknown-branch"
+                                ? "unknown-branch"
+                                : event.target.value === "true",
                         )
                       }
                     >
                       <option value="">未能確認</option>
                       <option value="true">未登錄剪影</option>
-                      <option value="false">彩色圖示</option>
+                      <option value="false">已登錄彩色圖示</option>
+                      <option value="unknown-branch">進化結果不明（例如問號）</option>
+                      <option value="unavailable">無法進化（沒有進化按鈕）</option>
                     </select>
-                    <small>從招式頁的進化按鈕判定；多分支進化暫不自動分類。</small>
+                    <small>從招式頁判定；問號代表有進化按鈕，但無法確定結果。特殊造型等個體可能沒有進化按鈕。</small>
                   </label>
                   <label className="edit-field">
                     <span>極巨化狀態</span>
@@ -2093,7 +2237,7 @@ function PokemonDrawer({
                 {a?.reasons.map((r, i) => (
                   <p key={i}>
                     <Check size={14} />
-                    {localizeMoveText(r, moveNames)}
+                    {localizeSpeciesName(localizeMoveText(r, moveNames))}
                   </p>
                 ))}
               </div>
@@ -2106,7 +2250,7 @@ function PokemonDrawer({
                   {a.actions.map((action, i) => (
                     <p className="action-item" key={i}>
                       <span>{i + 1}</span>
-                      {localizeMoveText(action, moveNames)}
+                      {localizeSpeciesName(localizeMoveText(action, moveNames))}
                     </p>
                   ))}
                 </section>
@@ -2126,7 +2270,7 @@ function PokemonDrawer({
                       key={`${l.speciesId}/${l.league}`}
                     >
                       <div>
-                        <strong>{l.name}</strong>
+                        <strong>{localizeSpeciesName(l.name, l.speciesId)}</strong>
                         <span className="subtle-tag">
                           {l.league === 1500
                             ? "超級聯盟"
@@ -2208,7 +2352,7 @@ function PokemonDrawer({
                         key={`${r.speciesId}/${r.type}`}
                       >
                         <div>
-                          <strong>{r.name}</strong>
+                          <strong>{localizeSpeciesName(r.name, r.speciesId)}</strong>
                           <span className="subtle-tag">
                             {typeName(r.type)} · 物種 #{r.rank}
                           </span>
@@ -2271,7 +2415,7 @@ function PokemonDrawer({
                   </h3>
                   <ul>
                     {a.warnings.map((w) => (
-                      <li key={w}>{localizeMoveText(w, moveNames)}</li>
+                      <li key={w}>{localizeSpeciesName(localizeMoveText(w, moveNames))}</li>
                     ))}
                   </ul>
                 </div>

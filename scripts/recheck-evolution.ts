@@ -4,7 +4,7 @@ import { evolutionSilhouette } from "../src/lib/evolution-silhouette";
 import { reevaluate } from "../src/lib/evaluate";
 import { readLocalOcr } from "../src/lib/local-ocr";
 import { activeBatch, activeScan } from "../src/lib/iphone-data";
-import { all, dataDir, get, getSnapshot, put, transaction } from "../src/lib/store";
+import { all, dataDir, get, getSnapshot, now, put, transaction } from "../src/lib/store";
 import type { Scan, ScanItem } from "../src/lib/iphone-types";
 import { effective, type Pokemon } from "../src/lib/types";
 
@@ -22,6 +22,9 @@ if (recheckAll && !speciesFilter)
   throw new Error("重新檢查所有結果時必須指定 --species=物種ID");
 const items = all<ScanItem>("scan_items")
   .filter((item) => item.scanId === scan.id && item.pokemonId && item.movesFrame)
+  .filter((item) =>
+    get<Pokemon>("pokemon", item.pokemonId!)?.verification !== "human",
+  )
   .filter((item) =>
     recheckAll ? true : recheckUnknown
       ? item.evolutionSilhouette == null
@@ -46,8 +49,10 @@ const items = all<ScanItem>("scan_items")
   });
 let silhouettes = 0;
 let coloured = 0;
+let unavailable = 0;
+let unknownBranch = 0;
 let uncertain = 0;
-const updates: { item: ScanItem; result: boolean | null }[] = [];
+const updates: { item: ScanItem; result: Awaited<ReturnType<typeof evolutionSilhouette>> }[] = [];
 for (let offset = 0; offset < items.length; offset += 16) {
   const group = items.slice(offset, offset + 16).filter((item) =>
     fs.existsSync(path.join(dataDir, "frames", item.movesFrame!)),
@@ -57,9 +62,17 @@ for (let offset = 0; offset < items.length; offset += 16) {
   const lines = await readLocalOcr(files);
   for (let index = 0; index < group.length; index++) {
     const item = group[index];
-    const result = await evolutionSilhouette(files[index], lines[index]);
+    const pokemon = get<Pokemon>("pokemon", item.pokemonId!);
+    const speciesId = pokemon && effective(pokemon).speciesId;
+    const evolutions = speciesId ? snapshot?.species[speciesId]?.evolutions || [] : [];
+    const ambiguousOutcome = new Set(
+      evolutions.filter((evolution) => !evolution.condition).map((evolution) => evolution.id),
+    ).size > 1;
+    const result = await evolutionSilhouette(files[index], lines[index], ambiguousOutcome);
     if (result === true) silhouettes++;
     else if (result === false) coloured++;
+    else if (result === "unavailable") unavailable++;
+    else if (result === "unknown-branch") unknownBranch++;
     else uncertain++;
     updates.push({ item, result });
   }
@@ -68,14 +81,15 @@ transaction(() => {
   if (activeScan() || activeBatch())
     throw new Error("手機工作進行中，稍後再回填進化剪影");
   for (const { item, result } of updates) {
-    put("scan_items", item.id, { ...item, evolutionSilhouette: result });
     const pokemon = get<Pokemon>("pokemon", item.pokemonId!);
-    if (pokemon)
-      put("pokemon", pokemon.id, { ...pokemon, evolutionSilhouette: result });
+    if (pokemon?.verification === "human") continue;
+    put("scan_items", item.id, { ...item, evolutionSilhouette: result });
+    if (pokemon && pokemon.evolutionSilhouette !== result)
+      put("pokemon", pokemon.id, { ...pokemon, evolutionSilhouette: result, updatedAt: now() });
   }
 });
 reevaluate();
 console.log(
-  JSON.stringify({ scanned: items.length, silhouettes, coloured, uncertain }),
+  JSON.stringify({ scanned: items.length, silhouettes, coloured, unavailable, unknownBranch, uncertain }),
 );
 process.exit(0);

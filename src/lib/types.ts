@@ -106,8 +106,8 @@ export type Pokemon = {
   candidates: string[];
   verified: boolean;
   verification?: "human" | "automatic" | null;
-  /** Evolve-button silhouette observed in an iPhone moves screenshot. */
-  evolutionSilhouette?: boolean | null;
+  /** true: unregistered silhouette; false: coloured icon; unavailable: no button; unknown-branch: uncertain destination. */
+  evolutionSilhouette?: boolean | "unavailable" | "unknown-branch" | null;
   /** Badge on the iPhone detail page; null means that it was not readable. */
   maxStatus?: MaxStatus | null;
   locked: boolean;

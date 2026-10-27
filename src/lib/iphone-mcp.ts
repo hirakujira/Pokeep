@@ -78,7 +78,7 @@ export class IphoneMcp {
     await this.request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "pokekeep", version: "0.1.0" },
+      clientInfo: { name: "pokeep", version: "0.1.0" },
     });
     child.stdin.write(
       JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) +

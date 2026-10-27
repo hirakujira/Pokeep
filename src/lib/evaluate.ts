@@ -4,6 +4,7 @@ import {
   type Cost,
   type Fields,
   type LeagueResult,
+  type Observation,
   type Pokemon,
   type RaidResult,
   type Settings,
@@ -12,6 +13,7 @@ import {
 } from "./types";
 import {
   all,
+  get,
   getSettings,
   getSnapshot,
   listPokemon,
@@ -23,6 +25,79 @@ import { blockingEvidenceIssues, specialStateFromMoves } from "./iphone-safety";
 import { moveName } from "./move-names";
 import { typeName } from "./type-names";
 import type { Scan, ScanItem } from "./iphone-types";
+
+const localizedMoveAliases: Record<string, string> = { "逆鱗": "OUTRAGE" };
+// These labels were used for the same chest-worn goggles in saved Charmander
+// screenshots. Keep the original wording as evidence, but group their collection slot.
+const charmanderGoggles = new Set([
+  "泳鏡", "佩戴泳鏡", "胸前佩戴護目鏡", "胸前掛著護目鏡",
+  "胸前佩戴黃色邊框護目鏡", "胸前掛著黃框太陽眼鏡",
+  "胸前佩戴皮卡丘造型遮陽帽",
+]);
+export function collectionCostume(speciesId: string | null, costume: string | null) {
+  return speciesId === "charmander" && costume && charmanderGoggles.has(costume)
+    ? "胸前護目鏡"
+    : costume;
+}
+
+export function verificationEvidenceGaps(
+  item: ScanItem | null,
+  top: Observation | null,
+  appraisal: Observation | null,
+  levels: number[],
+  issues: string[] = [],
+  costume: string | null = null,
+) {
+  if (!item) return ["沒有保存可供自動核對的手機掃描檢查點"];
+  const gaps: string[] = [];
+  // Other failed visual checks add a saved issue during analysis. Without one,
+  // the remaining failed protection check is costumeAbsentClear.
+  if (!item.protectionClear)
+    gaps.push(costume
+      ? `已辨識特殊服裝（${costume}），造型需人工核對`
+      : issues.length
+        ? "能力頁外觀安全檢查未通過；請查看下方截圖問題"
+        : "外觀辨識未能確認沒有特殊服裝");
+  if (!top || !appraisal) {
+    gaps.push("缺少能力頁或評價頁的辨識紀錄");
+  } else {
+    if (!top.fields.name || !appraisal.fields.name)
+      gaps.push(`${!top.fields.name ? "能力頁" : "評價頁"}名稱辨識結果為空，無法交叉比對`);
+    else if (top.fields.name !== appraisal.fields.name)
+      gaps.push("能力頁與評價頁名稱不一致");
+    if (top.fields.cp === null || appraisal.fields.cp === null)
+      gaps.push(`${top.fields.cp === null ? "能力頁" : "評價頁"} CP 辨識結果為空，無法交叉比對`);
+    else if (top.fields.cp !== appraisal.fields.cp)
+      gaps.push("能力頁與評價頁 CP 不一致");
+    const iv = [appraisal.fields.ivAtk, appraisal.fields.ivDef, appraisal.fields.ivSta];
+    if (!item.measuredIV || item.measuredIV.length !== 3 ||
+        iv.some((value, index) => value === null || value !== item.measuredIV![index]))
+      gaps.push("評價頁 IV 與本機量測未一致");
+  }
+  if (levels.length > 1) gaps.push("CP、HP 與 IV 對應多個可能等級");
+  return gaps;
+}
+
+function unverifiedReason(p: Pokemon, a: Analysis) {
+  const source = p.sources.find((entry) => entry.source === "iphone" && entry.scanItemId);
+  const item = source?.scanItemId ? get<ScanItem>("scan_items", source.scanItemId) : null;
+  const observation = (frame: string | null | undefined) => {
+    const evidence = p.sources.find((entry) => entry.frame === frame &&
+      entry.scanItemId === source?.scanItemId);
+    return evidence ? get<Observation>("observations", evidence.observationId) : null;
+  };
+  const gaps = verificationEvidenceGaps(
+    item,
+    observation(item?.frame),
+    observation(item?.appraisalFrame),
+    a.currentLevels,
+    p.issues,
+    effective(p).costume,
+  );
+  return gaps.length
+    ? `自動核對未通過：${gaps.join("；")}`
+    : "當時未保存自動核對失敗的細項；請對照來源截圖人工核對";
+}
 
 function reviewReason(p: Pokemon, f: Fields, a: Analysis) {
   if (p.candidates.length) return "與既有個體配對不明，請核對是否為同一隻";
@@ -41,7 +116,7 @@ function reviewReason(p: Pokemon, f: Fields, a: Analysis) {
   if (f.hp === null || f.height === null || f.weight === null)
     return "HP、身高或體重資料不完整";
   if (!a.currentLevels.length) return "CP、HP 與 IV 無法對應合理等級";
-  if (!p.verified) return "多畫面證據尚未通過自動核對";
+  if (!p.verified) return unverifiedReason(p, a);
   const analysisGap = a.warnings.find(
     (warning) => warning.includes("不完整") || warning.includes("不適用"),
   );
@@ -291,7 +366,9 @@ function assess(p: Pokemon, snapshot: Snapshot | null): Analysis {
   }
   if (f.shadow === null || f.shiny === null || f.purified === null)
     a.warnings.push("暗影、淨化或色違狀態未確認");
-  const prefix = `${s.id.replace(/_shadow$/, "")}/${f.form || s.form || "normal"}/${f.costume || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
+  const collectionForm = !s.form && (!f.form || f.form === "一般" || f.form === "normal")
+    ? "normal" : f.form || s.form;
+  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm}/${collectionCostume(f.speciesId, f.costume) || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
   if (f.shiny) a.collectionKeys.push(`${prefix}/shiny`);
   if (f.costume) a.collectionKeys.push(`${prefix}/costume`);
   if (s.form) a.collectionKeys.push(`${prefix}/form`);
@@ -312,19 +389,24 @@ function assess(p: Pokemon, snapshot: Snapshot | null): Analysis {
     );
   const current = a.currentLevels.length === 1 ? a.currentLevels[0] : null;
   const paths = evolutionPaths(s, f, snapshot);
+  const movesWithPveData = new Set(Object.values(snapshot.moves).map((move) => move.name));
   if (paths.some((path) => path.condition))
     a.warnings.push("部分進化有額外條件，尚未確認符合前僅列潛力");
   for (const path of paths) {
     const target = path.s;
-    const missingPveMoves = [...target.fast, ...target.charged].filter(
-      (move) => !snapshot.moves[move],
-    );
-    if (missingPveMoves.length)
-      a.warnings.push(
-        `${target.id === s.id ? "目前形態" : "可能進化形態"} ${target.name} 的招式 ${missingPveMoves
-          .map((move) => moveName(move, snapshot.moveNames))
-          .join("、")} 缺少團體戰（PvE）威力／時長資料，團體戰輸出比較不完整`,
-      );
+    if (target.id === s.id) {
+      const missingEquippedMoves = [f.fastMove, f.chargeMove, f.chargeMove2]
+        .filter((move): move is string => Boolean(move))
+        .filter((move) => !snapshot.moves[move] &&
+          !snapshot.moves[localizedMoveAliases[move]] &&
+          !movesWithPveData.has(move));
+      if (missingEquippedMoves.length)
+        a.warnings.push(
+          `目前辨識的招式 ${missingEquippedMoves
+            .map((move) => moveName(move, snapshot.moveNames))
+            .join("、")} 在資料表中沒有團體戰（PvE）數值；這組實際招式的輸出無法估算`,
+        );
+    }
     for (const cap of [1500, 2500, 10000]) {
       const ranking = snapshot.rankings[String(cap)] || [],
         index = ranking.findIndex((r) => r.speciesId === target.id),
@@ -849,6 +931,10 @@ export function evaluateCollection(
       a.reasons.unshift(reviewReason(p, f, a));
     } else if (hasCombat) a.category = "invest";
     else if (picks.length) a.category = "collect";
+    else if (p.evolutionSilhouette === "unknown-branch") {
+      a.category = "collect";
+      a.reasons.unshift("進化結果不明；保留待確認目標與進化方式");
+    }
     else if (
       f.speciesId && snapshot?.species[f.speciesId]?.tags.some((tag) =>
         ["legendary", "mythical", "ultrabeast"].includes(tag),
@@ -861,12 +947,20 @@ export function evaluateCollection(
       a.category = "review";
       a.reasons.unshift("極巨化狀態未能從能力頁確認，放生前請核對");
     }
+    else if (f.costume !== null) {
+      a.category = "collect";
+      a.reasons.unshift("特殊造型保留，不列入自動放生候選");
+    }
     else {
       a.category = "transfer";
       a.reasons.push(
         "在已匯入且仍持有的個體中，未入選收藏代表、PvP 名額或團體戰隊伍",
       );
     }
+    if (p.evolutionSilhouette === "unavailable")
+      a.reasons.push("已人工確認此個體沒有進化按鈕");
+    if (p.evolutionSilhouette === "unknown-branch")
+      a.reasons.push("進化結果尚未對應到特定形態，不能據此判定哪個進化型尚未登錄");
     if (evolutionPeers.has(p.id))
       a.reasons.push("同類已有更適合進化的個體");
     if (maxPeers.has(p.id))
@@ -935,6 +1029,24 @@ export function evaluateCollection(
   }
   return result;
 }
+export function reconcileReviewedEvidence(p: Pokemon, snapshot: Snapshot | null): Pokemon {
+  if (p.verification !== "human" || !p.verified || !snapshot) return p;
+  const speciesId = effective(p).speciesId;
+  const species = speciesId ? snapshot.species[speciesId] : null;
+  if (!species) return p;
+  const issues = p.issues.filter((issue) =>
+    issue !== "物種／形態無法唯一對應，請人工核對",
+  );
+  const inferGender = species.genderless === true && p.fields.gender === null &&
+    !Object.hasOwn(p.overrides, "gender");
+  if (issues.length === p.issues.length && !inferGender) return p;
+  return {
+    ...p,
+    fields: inferGender ? { ...p.fields, gender: "genderless" } : p.fields,
+    issues,
+    updatedAt: now(),
+  };
+}
 export function reevaluate() {
   const latestFullScan = all<Scan>("scans")
     .filter((scan) => scan.scope === "all" && scan.status === "completed")
@@ -950,9 +1062,10 @@ export function reevaluate() {
     latestFullScan.scanned > 0
       ? new Set(fullItems.map((item) => item.pokemonId!))
       : undefined;
+  const snapshot = getSnapshot();
   const result = evaluateCollection(
-    listPokemon(),
-    getSnapshot(),
+    listPokemon().map((p) => reconcileReviewedEvidence(p, snapshot)),
+    snapshot,
     getSettings(),
     completeBoxIds,
   );

@@ -1,5 +1,10 @@
 import type { OcrLine } from "./local-ocr";
 import { effective, type Pokemon, type Snapshot } from "./types";
+import {
+  defaultTransferSearchFilters,
+  transferSearchQuery,
+  type TransferSearchFilter,
+} from "./transfer-search-filters";
 
 export type CpCandidate = {
   cp: number;
@@ -52,32 +57,48 @@ export function searchQueryMatches(lines: OcrLine[], dex: number): boolean {
 
 /** Keep background Pokémon out of the result list used for transfer. */
 export function nonBackgroundQuery(dex: number) {
-  if (!Number.isInteger(dex) || dex < 1 || dex > 10000)
-    throw new Error("沒有可靠的圖鑑編號，無法排除特殊背卡");
-  return `${dex}&!背卡`;
+  return transferSearchQuery(dex);
 }
 
-export function nonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
-  const search = lines.find(
-    (line) => line.x > 0.1 && line.x < 0.65 &&
-      line.y > 0.78 && line.y < 0.85,
+export function transferQueryMatches(
+  lines: OcrLine[], dex: number, selected: readonly TransferSearchFilter[],
+) {
+  if (selected.length === 0) return searchQueryMatches(lines, dex);
+  const search = lines.find((line) =>
+    line.x > 0.1 && line.x < 0.65 && line.y > 0.78 && line.y < 0.85,
   );
   const text = search?.text.normalize("NFKC").toLowerCase().replace(/\s/g, "") || "";
-  const query = nonBackgroundQuery(dex);
+  const query = transferSearchQuery(dex, selected).toLowerCase();
   const prefix = text.slice(0, -query.length);
   return text.endsWith(query) && ["", "q", "⌕", "🔍"].includes(prefix);
 }
 
-/** Cropped search text has no magnifier prefix or position in the full frame. */
-export function croppedNonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
+export function nonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
+  return transferQueryMatches(lines, dex, defaultTransferSearchFilters);
+}
+
+export function croppedTransferQueryMatches(
+  lines: OcrLine[], dex: number, selected: readonly TransferSearchFilter[],
+) {
   const visible = lines.map((line) => line.text.normalize("NFKC").replace(/\s/g, ""))
     .filter(Boolean);
-  return visible.length === 1 && visible[0] === nonBackgroundQuery(dex);
+  return visible.length === 1 && visible[0] === transferSearchQuery(dex, selected);
+}
+
+/** Cropped search text has no magnifier prefix or position in the full frame. */
+export function croppedNonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
+  return croppedTransferQueryMatches(lines, dex, defaultTransferSearchFilters);
+}
+
+export function croppedTransferQueryConsensus(
+  readings: OcrLine[][], dex: number, selected: readonly TransferSearchFilter[],
+) {
+  return readings.length === 3 &&
+    readings.filter((lines) => croppedTransferQueryMatches(lines, dex, selected)).length >= 2;
 }
 
 export function croppedNonBackgroundConsensus(readings: OcrLine[][], dex: number) {
-  return readings.length === 3 &&
-    readings.filter((lines) => croppedNonBackgroundQueryMatches(lines, dex)).length >= 2;
+  return croppedTransferQueryConsensus(readings, dex, defaultTransferSearchFilters);
 }
 
 export function croppedBackgroundTextCompatible(readings: OcrLine[][], dex: number) {

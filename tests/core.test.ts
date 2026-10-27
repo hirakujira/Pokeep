@@ -6,6 +6,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { fixture, record, species, settings } from "./fixtures";
 import { emptyFields, settingsSchema, type Observation } from "../src/lib/types";
+import type { ScanItem } from "../src/lib/iphone-types";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pogo-test-"));
 (globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
@@ -17,22 +18,117 @@ const {
   rankIV,
   evolutionPaths,
   evaluateCollection,
+  verificationEvidenceGaps,
+  reconcileReviewedEvidence,
+  collectionCostume,
   cycleDps,
 } = await import("../src/lib/evaluate");
 const { matching, integrateObservations } = await import("../src/lib/matching");
 const { reconcileIV, recognize } = await import("../src/lib/vision");
 const { measureIV } = await import("../src/lib/iv");
 const { evolutionSilhouette } = await import("../src/lib/evolution-silhouette");
-const { maxStatusFromOcr } = await import("../src/lib/max-status");
+const { maxStatusFromOcr, maxStatusFromEvidence } = await import("../src/lib/max-status");
 const { moveName, localizeMoveText } = await import("../src/lib/move-names");
+const { localizeSpeciesName } = await import("../src/lib/species-names");
 const { typeName } = await import("../src/lib/type-names");
-const { transferExclusion } = await import("../src/lib/iphone-safety");
+const { transferExclusion, requireSpecialCorroboration } = await import("../src/lib/iphone-safety");
 const store = await import("../src/lib/store");
 const { exportBackup, importBackup, exportCsv, validFrame } =
   await import("../src/lib/backup");
 after(() => {
   store.db().close();
   fs.rmSync(temp, { recursive: true, force: true });
+});
+
+test("物種與地區形態顯示繁中，保留原始 ID 作配對", () => {
+  assert.equal(localizeSpeciesName("小拉達 (Alolan)", "rattata_alolan"),
+    "小拉達（阿羅拉的樣子）");
+  assert.equal(localizeSpeciesName("烏波 (Paldean)", "wooper_paldean"),
+    "烏波（帕底亞的樣子）");
+  assert.equal(localizeSpeciesName("肯泰羅 (Aqua)", "tauros_aqua"),
+    "肯泰羅（帕底亞・水瀾種）");
+  assert.equal(localizeSpeciesName("雷電雲 (Therian)（暗影）", "thundurus_therian_shadow"),
+    "雷電雲（靈獸形態）（暗影）");
+  assert.equal(localizeSpeciesName("酋雷姆 (Black)", "kyurem_black"), "闇黑酋雷姆");
+  assert.equal(localizeSpeciesName("寶可夢 (Unknown)"), "寶可夢 (Unknown)");
+});
+
+test("自動核對失敗列出保存的畫面缺口", () => {
+  const item: ScanItem = {
+    id: "item", scanId: "scan", position: 0,
+    frame: "scan/top.jpg", appraisalFrame: "scan/iv.jpg",
+    fingerprint: "fingerprint", pokemonId: "pokemon", fields: null,
+    issues: [], protectionClear: false, measuredIV: [10, 12, 14],
+    capturedAt: "2026-10-26T00:00:00.000Z",
+  };
+  const top: Observation = {
+    id: "top", jobId: "scan", segment: "item", frame: item.frame,
+    time: 0, video: "iPhone Use", kind: "details", issues: [], ivMeasured: null,
+    fields: { ...emptyFields(), name: "喵喵", cp: 14 },
+  };
+  const appraisal: Observation = {
+    ...top, id: "iv", frame: item.appraisalFrame!, kind: "appraisal",
+    ivMeasured: [10, 12, 14],
+    fields: { ...emptyFields(), cp: 14, ivAtk: 10, ivDef: 12, ivSta: 14 },
+  };
+  assert.deepEqual(verificationEvidenceGaps(item, top, appraisal, [5]), [
+    "外觀辨識未能確認沒有特殊服裝",
+    "評價頁名稱辨識結果為空，無法交叉比對",
+  ]);
+  assert.deepEqual(verificationEvidenceGaps({ ...item, protectionClear: true },
+    top, { ...appraisal, fields: { ...appraisal.fields, name: "喵喵" } }, [5]), []);
+  assert.deepEqual(verificationEvidenceGaps(null, top, appraisal, [5]),
+    ["沒有保存可供自動核對的手機掃描檢查點"]);
+  assert.deepEqual(verificationEvidenceGaps(item, top, appraisal, [5], [], "胸前護目鏡"), [
+    "已辨識特殊服裝（胸前護目鏡），造型需人工核對",
+    "評價頁名稱辨識結果為空，無法交叉比對",
+  ]);
+});
+
+test("人工核對後只清理已解決的物種缺口，並補回無性別資料", () => {
+  const snapshot = fixture();
+  snapshot.species.ditto = species("ditto", { genderless: true });
+  const reviewed = record("ditto", { speciesId: "ditto", gender: null }, {
+    verification: "human",
+    issues: ["物種／形態無法唯一對應，請人工核對", "能力與評價頁名稱不一致"],
+  });
+  const reconciled = reconcileReviewedEvidence(reviewed, snapshot);
+  assert.equal(reconciled.fields.gender, "genderless");
+  assert.deepEqual(reconciled.issues, ["能力與評價頁名稱不一致"]);
+  assert.deepEqual(reviewed.issues, ["物種／形態無法唯一對應，請人工核對", "能力與評價頁名稱不一致"]);
+  assert.equal(reconcileReviewedEvidence({ ...reviewed, verified: false }, snapshot).fields.gender, null);
+  assert.equal(reconcileReviewedEvidence({ ...reviewed, overrides: { gender: null } }, snapshot).fields.gender, null);
+});
+
+test("同款小火龍護目鏡歸為同一收藏槽，其他服裝仍分開", () => {
+  assert.equal(collectionCostume("charmander", "泳鏡"), "胸前護目鏡");
+  assert.equal(collectionCostume("charmander", "胸前佩戴皮卡丘造型遮陽帽"), "胸前護目鏡");
+  assert.equal(collectionCostume("piplup", "南瓜帽"), "南瓜帽");
+  const snapshot = fixture();
+  snapshot.species.charmander = species("charmander");
+  const evaluated = evaluateCollection([
+    record("first", { speciesId: "charmander", costume: "泳鏡" }),
+    record("second", { speciesId: "charmander", form: "一般", costume: "胸前佩戴皮卡丘造型遮陽帽" }),
+  ], snapshot, { ...settings, rareRepresentatives: 1 });
+  assert.equal(evaluated.filter((p) => p.analysis?.reasons.includes("保留此特殊收藏的代表個體")).length, 1);
+  assert.deepEqual(evaluated.map((p) => p.analysis?.category), ["collect", "collect"]);
+});
+
+test("單張畫面的暗影與淨化判斷須有招式或第二畫面佐證", () => {
+  const snapshot = fixture();
+  snapshot.species.pikachu = species("pikachu", { dex: 25 });
+  snapshot.species.pikachu_shadow = species("pikachu_shadow", { dex: 25, tags: ["shadow"] });
+  const appearanceOnly = { ...emptyFields(), speciesId: "pikachu_shadow", shadow: true, purified: false };
+  assert.equal(requireSpecialCorroboration(appearanceOnly, snapshot), true);
+  assert.equal(appearanceOnly.speciesId, "pikachu");
+  assert.equal(appearanceOnly.shadow, null);
+  assert.equal(appearanceOnly.purified, null);
+  const moveProof = { ...emptyFields(), speciesId: "pikachu_shadow", shadow: true, purified: false, chargeMove: "FRUSTRATION" };
+  assert.equal(requireSpecialCorroboration(moveProof, snapshot), false);
+  assert.equal(moveProof.shadow, true);
+  const purifiedAppearance = { ...emptyFields(), speciesId: "pikachu", shadow: false, purified: true };
+  assert.equal(requireSpecialCorroboration(purifiedAppearance, snapshot), true);
+  assert.equal(purifiedAppearance.purified, null);
 });
 
 test("招式 ID、舊分析文字和手動輸入都能顯示繁體中文", () => {
@@ -45,11 +141,46 @@ test("招式 ID、舊分析文字和手動輸入都能顯示繁體中文", () =>
   assert.equal(moveName("AEGISLASH_CHARGE_PSYCHO_CUT", names), "精神利刃");
   assert.equal(moveName("CHILLING_WATER", names), "冷水");
   assert.equal(moveName("PYROBALL", names), "火焰球");
+  assert.equal(moveName("HIDDEN_POWER_BUG", names), "覺醒力量（蟲）");
   assert.equal(moveName("預知未來", names), "預知未來");
   assert.equal(
     localizeMoveText("招式 AEGISLASH_CHARGE_PSYCHO_CUT、Chilling Water", names),
     "招式 精神利刃、冷水",
   );
+});
+
+test("招式池缺 PvE 數值不誤報到個體；只提示目前辨識的缺值招式", () => {
+  const snapshot = fixture();
+  snapshot.species.caterpie = species("caterpie", {
+    name: "圖圖犬",
+    fast: ["BUG_BITE", "HIDDEN_POWER_BUG"],
+    charged: ["STRUGGLE", "FUTURE_SIGHT"],
+  });
+  const known = record("known-moves", {
+    name: "圖圖犬", fastMove: "BUG_BITE", chargeMove: "STRUGGLE",
+  });
+  const [assessed] = evaluateCollection([known], snapshot, settings);
+  assert.ok(!assessed.analysis?.warnings.some((warning) => warning.includes("PvE")));
+  const localized = record("localized-move", {
+    name: "圖圖犬", fastMove: "蟲咬", chargeMove: "掙扎",
+  });
+  const [withLocalizedMoves] = evaluateCollection([localized], snapshot, settings);
+  assert.ok(!withLocalizedMoves.analysis?.warnings.some((warning) => warning.includes("PvE")));
+  snapshot.moves.OUTRAGE = {
+    id: "OUTRAGE", name: "逆麟", type: "dragon", power: 110,
+    energy: -50, duration: 4,
+  };
+  const alternateSpelling = record("alternate-spelling", {
+    name: "圖圖犬", fastMove: "BUG_BITE", chargeMove: "逆鱗",
+  });
+  const [withAlternateSpelling] = evaluateCollection([alternateSpelling], snapshot, settings);
+  assert.ok(!withAlternateSpelling.analysis?.warnings.some((warning) => warning.includes("PvE")));
+  const unknown = record("unknown-move", {
+    name: "圖圖犬", fastMove: "HIDDEN_POWER_BUG", chargeMove: "STRUGGLE",
+  });
+  const [withMissingEquippedMove] = evaluateCollection([unknown], snapshot, settings);
+  assert.ok(withMissingEquippedMove.analysis?.warnings.some((warning) =>
+    warning.includes("覺醒力量（蟲）") && warning.includes("目前辨識的招式")));
 });
 
 test("團體戰每屬性可保留二軍，設定與分析都接受 12 個名額", () => {
@@ -144,6 +275,34 @@ test("未登錄進化剪影與完整盒子缺少下一階才列為可進化", ()
   )[0];
   assert.equal(unknown.analysis?.category, "review");
   assert.match(unknown.analysis?.reasons[0] || "", /進化剪影尚未判定/);
+  const unavailable = evaluateCollection(
+    [{ ...first, evolutionSilhouette: "unavailable" }], snapshot, settings, fullBox,
+  )[0];
+  assert.notEqual(unavailable.analysis?.category, "review");
+  assert.notEqual(unavailable.analysis?.category, "evolve");
+  assert.ok(unavailable.analysis?.reasons.includes("已人工確認此個體沒有進化按鈕"));
+  const costumed = evaluateCollection(
+    [record("costumed", { costume: "特殊造型" }, { evolutionSilhouette: "unavailable" })],
+    snapshot, settings, new Set(["costumed"]),
+  )[0];
+  assert.equal(costumed.analysis?.category, "collect");
+  snapshot.species.eevee = species("eevee", {
+    evolutions: [
+      { id: "vaporeon", candy: 25, condition: null },
+      { id: "jolteon", candy: 25, condition: null },
+    ],
+  });
+  snapshot.species.vaporeon = species("vaporeon");
+  snapshot.species.jolteon = species("jolteon");
+  const eevee = record("eevee", { speciesId: "eevee" }, {
+    evolutionSilhouette: "unknown-branch",
+  });
+  const uncertainBranch = evaluateCollection(
+    [eevee], snapshot, settings, new Set([eevee.id]),
+  )[0];
+  assert.equal(uncertainBranch.analysis?.category, "collect");
+  assert.match(uncertainBranch.analysis?.reasons.join(" ") || "", /進化結果不明/);
+  assert.ok(transferExclusion(uncertainBranch, snapshot));
   const evolved = record("evolved", { speciesId: "metapod" });
   assert.notEqual(
     evaluateCollection(
@@ -217,6 +376,51 @@ test("灰藍色單一進化按鈕的未登錄剪影可辨識", async () => {
   ]), true);
 });
 
+test("大面積粉色剪影、低信心文字與漏讀進化標籤仍可區分已登錄圖像", async () => {
+  const make = async (name: string, button: string, icon: string) => {
+    const file = path.join(temp, name);
+    const svg = Buffer.from(`<svg width="600" height="926" xmlns="http://www.w3.org/2000/svg">
+      <rect width="600" height="926" fill="white"/>
+      <rect x="40" y="430" width="240" height="80" fill="${button}"/>
+      <rect x="110" y="450" width="40" height="35" fill="${icon}"/>
+    </svg>`);
+    await sharp(svg).png().toFile(file);
+    return file;
+  };
+  const pink = await make("large-pink-silhouette.png", "#ffcae8", "#bf93aa");
+  const green = await make("low-confidence-silhouette.png", "#9dd7b3", "#54866e");
+  const registered = await make("registered-evolution.png", "#9dd7b3", "#808080");
+  const evolve = { text: "進化", confidence: 0.3, x: 0.29, y: 0.4665 };
+  assert.equal(await evolutionSilhouette(pink, [{ ...evolve, confidence: 0.5 }]), true);
+  assert.equal(await evolutionSilhouette(green, [evolve]), true);
+  assert.equal(await evolutionSilhouette(registered, [evolve]), false);
+  assert.equal(await evolutionSilhouette(registered, [evolve], true), null);
+  const fallback = [
+    { text: "強化", confidence: 0.5, x: 0.23, y: 0.5585 },
+    { text: "50", confidence: 0.5, x: 0.7, y: 0.4665 },
+  ];
+  assert.equal(await evolutionSilhouette(green, fallback), true);
+  assert.equal(await evolutionSilhouette(registered, fallback), false);
+  assert.equal(await evolutionSilhouette(green, fallback.slice(0, 1)), null);
+});
+
+test("進化問號與沒有進化列須有完整 OCR 位置證據", async () => {
+  const file = path.join(temp, "evolution-button-states.png");
+  await sharp({ create: { width: 600, height: 900, channels: 3, background: "white" } })
+    .png().toFile(file);
+  const line = (text: string, x: number, y: number) =>
+    ({ text, x, y, confidence: 0.5 });
+  const evolve = line("進化", 0.29, 0.48);
+  assert.equal(await evolutionSilhouette(file, [evolve, line("？", 0.19, 0.47)], true),
+    "unknown-branch");
+  assert.equal(await evolutionSilhouette(file, [evolve, line("？", 0.19, 0.3)], true), null);
+  const powerUp = line("強化", 0.23, 0.46);
+  const newMove = line("新攻擊招式", 0.16, 0.16);
+  assert.equal(await evolutionSilhouette(file, [powerUp, newMove]), "unavailable");
+  assert.equal(await evolutionSilhouette(file, [powerUp]), null);
+  assert.equal(await evolutionSilhouette(file, [powerUp, { ...newMove, y: 0.05 }]), null);
+});
+
 test("能力頁極巨化徽章與完整一般頁能區分；不完整畫面保持未知", () => {
   const line = (text: string, y: number, x = 0.35) =>
     ({ text, y, x, confidence: 0.9 });
@@ -227,6 +431,24 @@ test("能力頁極巨化徽章與完整一般頁能區分；不完整畫面保�
   assert.equal(maxStatusFromOcr(detail), "none");
   assert.equal(maxStatusFromOcr([line("CP290", 0.96)]), null);
   assert.equal(maxStatusFromOcr([...detail, line("極巨化", 0.7)]), "none");
+});
+
+test("徽章區像素與能力頁欄位互證，容忍 CP 或星塵 OCR 漏字", () => {
+  const line = (text: string, y: number, x = 0.4) =>
+    ({ text, y, x, confidence: 0.9 });
+  const page = [line("106/106 HP", 0.48), line("31.93kg", 0.4, 0.13),
+    line("1.52m", 0.4, 0.74), line("星星沙子", 0.27, 0.2),
+    line("強化", 0.05, 0.22)];
+  assert.equal(maxStatusFromEvidence(page, { pink: 0, white: 0.92 }), "none");
+  assert.equal(maxStatusFromEvidence([
+    ...page.slice(0, 3), line("CP409", 0.9), line("地面／幽靈", 0.38),
+  ], { pink: 0, white: 0.94 }), "none");
+  assert.equal(maxStatusFromEvidence(page, { pink: 0, white: 0 }), null);
+  assert.equal(maxStatusFromEvidence(page, { pink: 0.22, white: 0.72 }), null);
+  assert.equal(maxStatusFromEvidence([...page, line("極巨化", 0.3)],
+    { pink: 0.22, white: 0.72 }), "dynamax");
+  assert.equal(maxStatusFromEvidence([...page, line("超極巨化", 0.3)],
+    { pink: 0.22, white: 0.72 }), "gigantamax");
 });
 
 test("同物種極巨化只保留最佳一隻；超極巨化優先且未知不放生", () => {
@@ -809,4 +1031,38 @@ test("遊戲資料更新失敗時保留已驗證的舊快照", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("物種目錄包含脫殼忍者與已知形態，仍排除一般未開放資料", async () => {
+  const { normalizeData, addCatalogForms } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number, released: boolean) => ({
+    speciesId: id, speciesName: id, dex, released,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [],
+  });
+  const pokemon = Array.from({ length: 100 }, (_, index) =>
+    base(`fixture_${index}`, index + 1, true));
+  pokemon.push(base("shedinja", 292, false), base("ditto", 132, false),
+    base("cosmog", 789, false), base("unreleased_fixture", 9999, false));
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const normalized = normalizeData({ pokemon, moves: [] }, gm,
+    "RESOURCE ID: pokemon_name_0292\nTEXT: 脫殼忍者", ranks, "test-version");
+  assert.equal(normalized.species.shedinja.name, "脫殼忍者");
+  assert.ok(normalized.species.ditto);
+  assert.ok(normalized.species.cosmog);
+  assert.equal(normalized.species.unreleased_fixture, undefined);
+  normalized.species.nidoran_male = species("nidoran_male", { dex: 32, name: "尼多朗" });
+  normalized.species.squawkabilly = species("squawkabilly", { dex: 931, name: "怒鸚哥" });
+  addCatalogForms(normalized.species);
+  assert.equal(normalized.species.nidoran_m.dex, 32);
+  assert.equal(normalized.species.squawkabilly_green.name, "怒鸚哥（綠羽）");
 });

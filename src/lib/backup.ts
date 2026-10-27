@@ -52,7 +52,7 @@ export const pokemonBackupSchema = z.object({
   candidates: z.array(z.string().max(100)).max(1000),
   verified: z.boolean(),
   verification: z.enum(["human", "automatic"]).nullable().optional(),
-  evolutionSilhouette: z.boolean().nullable().optional(),
+  evolutionSilhouette: z.union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")]).nullable().optional(),
   maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
   locked: z.boolean(),
   owned: z.boolean(),
@@ -89,6 +89,7 @@ const scanSchema = z.object({
   stage: z.string().max(500),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
   scanned: z.number().int().nonnegative(),
   phase: z.enum(["capture", "analysis"]).optional(),
   analyzed: z.number().int().nonnegative().optional(),
@@ -123,7 +124,7 @@ const scanItemSchema = z.object({
   issues: z.array(z.string()),
   protectionClear: z.boolean(),
   favoriteRechecked: z.boolean().optional(),
-  evolutionSilhouette: z.boolean().nullable().optional(),
+  evolutionSilhouette: z.union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")]).nullable().optional(),
   maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
   shinyReview: z
     .object({
@@ -134,7 +135,16 @@ const scanItemSchema = z.object({
       reviewedAt: z.string().datetime(),
     })
     .optional(),
+  specialReview: z
+    .object({
+      verdict: z.enum(["normal", "shadow", "purified", "uncertain"]),
+      model: z.string().max(100),
+      reason: z.string().max(400),
+      reviewedAt: z.string().datetime(),
+    })
+    .optional(),
   capturedAt: z.string().datetime(),
+  analyzedAt: z.string().datetime().optional(),
 });
 const transferBatchSchema = z.object({
   id: z.string().max(100),
@@ -151,6 +161,10 @@ const transferBatchSchema = z.object({
     "stale",
   ]),
   mode: z.enum(["single", "bulk"]).optional(),
+  searchExclusions: z.array(z.enum([
+    "background", "lucky", "shiny", "costume", "shadow", "purified",
+    "favorite", "legendary", "mythical", "ultrabeast", "perfect",
+  ])).max(3).optional(),
   selectedPokemonId: z.string().nullable().optional(),
   signature: z.string(),
   entries: z.array(

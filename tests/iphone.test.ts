@@ -4,9 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { fixture, record, settings } from "./fixtures";
+import { fixture, record, settings, species } from "./fixtures";
 import type { Scan, ScanItem, TransferBatch } from "../src/lib/iphone-types";
 import type { IphoneMcp } from "../src/lib/iphone-mcp";
+import { emptyFields } from "../src/lib/types";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pokekeep-iphone-test-"));
 (globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
@@ -17,19 +18,23 @@ const { uniqueFormFromStats, displayForm } = await import("../src/lib/iphone-for
 const { exportBackup, importBackup } = await import("../src/lib/backup");
 const { recoverInterruptedPhoneWork } =
   await import("../src/lib/iphone-recovery");
-const { typeNumericSearch, typeBackgroundSearch, typeNonBackgroundSearch, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, observeGameForeground, settleAfterSubmitted } =
+const { typeNumericSearch, typeBackgroundSearch, typeNonBackgroundSearch, typeFilteredSearch, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, observeGameForeground, settleAfterSubmitted } =
   await import("../src/lib/iphone-transfer");
-const { cpCandidates, detailCp, searchResultCount, assertUniqueDexCp, standardTransferDialog, collectionSearchState, searchQueryMatches, backgroundQueryMatches, backgroundSearchDecision, nonBackgroundQuery, nonBackgroundQueryMatches, croppedNonBackgroundQueryMatches, croppedNonBackgroundConsensus, croppedBackgroundTextCompatible } =
+const { cpCandidates, detailCp, searchResultCount, assertUniqueDexCp, standardTransferDialog, collectionSearchState, searchQueryMatches, backgroundQueryMatches, backgroundSearchDecision, nonBackgroundQuery, nonBackgroundQueryMatches, transferQueryMatches, croppedTransferQueryConsensus, croppedNonBackgroundQueryMatches, croppedNonBackgroundConsensus, croppedBackgroundTextCompatible } =
   await import("../src/lib/iphone-transfer-search");
+const { transferSearchQuery, allowedPhoneSearchQuery } =
+  await import("../src/lib/transfer-search-filters");
 const { hasExclamationRun } = await import("../src/lib/iphone-query-glyph");
 const { resumableTransferIndexes } = await import("../src/lib/iphone-resume");
 const { detailFingerprint } = await import("../src/lib/iphone-fingerprint");
 const { formatOcrLines } = await import("../src/lib/local-ocr");
-const { processPreparedInOrder } = await import("../src/lib/ordered-prefetch");
-const { shinyConsensus } = await import("../src/lib/shiny-review");
+const { processGrowingInOrder, processPreparedInOrder } = await import("../src/lib/ordered-prefetch");
+const { scanTiming } = await import("../src/lib/scan-timing");
+const { shinyConsensus, shinyReferenceSource, upperAppearanceImage } = await import("../src/lib/shiny-review");
+const { specialVisualConsensus, applySpecialVisualVerdict } = await import("../src/lib/special-visual-review");
 const { caughtDateBadge } = await import("../src/lib/shiny-timeline");
-const { genderlessByDex } = await import("../src/lib/game-data");
-const { runScan, analyzeScan, captureOne } =
+const { genderlessByDex, resolveSpecies } = await import("../src/lib/game-data");
+const { runScan, analyzeScan, captureOne, applyStoredNormalShadowReviews, applyStoredShinyReviews } =
   await import("../src/lib/iphone-scan");
 after(() => {
   store.db().close();
@@ -135,6 +140,36 @@ test("暫停批次只續跑送出前失敗與未開始的個體", () => {
     entries: [...batch.entries, { pokemonId: "unknown", status: "uncertain", reason: null }],
   }), []);
   assert.deepEqual(resumableTransferIndexes({ ...batch, status: "approved" }), []);
+});
+
+test("只可跳過批次中尚未送出放生的當前失敗個體", async () => {
+  const { skippableTransferIndex } = await import("../src/lib/iphone-resume");
+  const batch = {
+    status: "paused",
+    mode: "bulk",
+    error: "確認畫面無法辨識",
+    entries: [
+      { pokemonId: "done", status: "submitted", reason: "已點擊放生", submittedAt: "today" },
+      { pokemonId: "failed", status: "skipped", reason: "確認畫面無法辨識", preparedAt: "today", evidence: "frame.png" },
+      { pokemonId: "next", status: "pending", reason: null },
+    ],
+  } as TransferBatch;
+  assert.equal(skippableTransferIndex(batch), 1);
+  assert.equal(skippableTransferIndex({ ...batch, mode: "single" }), null);
+  assert.equal(skippableTransferIndex({ ...batch, entries: batch.entries.slice(0, 2) }), null);
+  assert.equal(skippableTransferIndex({
+    ...batch,
+    entries: batch.entries.map((entry, index) => index === 1 ? { ...entry, sentAt: "today" } : entry),
+  }), null);
+  assert.equal(skippableTransferIndex({
+    ...batch,
+    entries: batch.entries.map((entry, index) => index === 1 ? { ...entry, status: "uncertain" } : entry),
+  }), null);
+  assert.equal(skippableTransferIndex({
+    ...batch,
+    entries: [...batch.entries.slice(0, 2), { pokemonId: "later", status: "submitted", reason: null }, batch.entries[2]],
+  }), null);
+  assert.equal(skippableTransferIndex({ ...batch, error: "其他錯誤" }), null);
 });
 
 test("前景 App 短暫切換只重新觀察；持續離開遊戲則暫停", async () => {
@@ -471,6 +506,158 @@ test("色違雙畫面複核只接受一致且明確對照一般配色的結果",
   );
 });
 
+test("色違參考圖使用實際海域型態，不以西海預設圖比對東海", () => {
+  const shellos = species("shellos", { dex: 422 });
+  assert.equal(shinyReferenceSource(shellos, "東海")?.url,
+    "https://pokeapi.co/api/v2/pokemon-form/shellos-east");
+  assert.equal(shinyReferenceSource(shellos, "西海")?.url,
+    "https://pokeapi.co/api/v2/pokemon-form/shellos-west");
+  assert.equal(shinyReferenceSource(shellos, null), null);
+  assert.notEqual(shinyReferenceSource(shellos, "東海")?.key,
+    shinyReferenceSource(shellos, "西海")?.key);
+});
+
+test("一般形態只在招式能區分地區型態時自動配對", () => {
+  const snapshot = fixture();
+  snapshot.species.darmanitan_standard = species("darmanitan_standard", {
+    dex: 555, name: "達摩狒狒 (Standard)", form: "(Standard)",
+    fast: ["FIRE_FANG"], charged: ["OVERHEAT"],
+  });
+  snapshot.species.darmanitan_galarian_standard = species("darmanitan_galarian_standard", {
+    dex: 555, name: "達摩狒狒 (Galarian)", form: "(Galarian)",
+    fast: ["ICE_FANG"], charged: ["OVERHEAT"],
+  });
+  const moves = { fastMove: "FIRE_FANG", chargeMove: "OVERHEAT", chargeMove2: null };
+  assert.equal(resolveSpecies(snapshot, "達摩狒狒", "一般形態", false, "darmanitan", moves)?.id,
+    "darmanitan_standard");
+  assert.equal(resolveSpecies(snapshot, "達摩狒狒", "一般形態", false, "darmanitan", {
+    ...moves, fastMove: null,
+  }), null);
+});
+
+test("暗影與淨化的外觀複核需兩張清楚畫面一致", () => {
+  const clear = {
+    top: "normal" as const,
+    appraisal: "normal" as const,
+    topClear: true,
+    appraisalClear: true,
+    reason: "兩張都沒有暗影或淨化效果",
+  };
+  assert.equal(specialVisualConsensus(clear), "normal");
+  assert.equal(specialVisualConsensus({ ...clear, appraisalClear: false }), "uncertain");
+  assert.equal(specialVisualConsensus({ ...clear, appraisal: "shadow" }), "uncertain");
+  assert.equal(specialVisualConsensus({ ...clear, top: "uncertain" }), "uncertain");
+  assert.equal(specialVisualConsensus({ ...clear, top: "purified", appraisal: "purified" }), "purified");
+});
+
+test("外觀普通保留待核對，明確特殊效果才補值且不覆蓋既有欄位", () => {
+  const snapshot = fixture();
+  snapshot.species.pikachu = species("pikachu", { dex: 25 });
+  const unknown = { ...emptyFields(), speciesId: "pikachu" };
+  applySpecialVisualVerdict(unknown, "normal", snapshot);
+  assert.equal(unknown.shadow, false);
+  assert.equal(unknown.purified, null);
+  const purified = { ...emptyFields(), speciesId: "pikachu" };
+  applySpecialVisualVerdict(purified, "purified", snapshot);
+  assert.equal(purified.shadow, false);
+  assert.equal(purified.purified, true);
+  applySpecialVisualVerdict(purified, "shadow", snapshot);
+  assert.equal(purified.purified, true);
+  const noVariant = { ...emptyFields(), speciesId: "pikachu" };
+  applySpecialVisualVerdict(noVariant, "shadow", snapshot);
+  assert.equal(noVariant.shadow, null);
+  snapshot.species.pikachu_shadow = species("pikachu_shadow", { dex: 25, tags: ["shadow"] });
+  applySpecialVisualVerdict(noVariant, "shadow", snapshot);
+  assert.equal(noVariant.speciesId, "pikachu_shadow");
+  assert.equal(noVariant.shadow, true);
+  assert.equal(noVariant.purified, false);
+  const balloon = { ...emptyFields(), speciesId: "pikachu", costume: "氣球" };
+  applySpecialVisualVerdict(balloon, "purified", snapshot);
+  assert.equal(balloon.purified, null);
+});
+
+test("已存普通外觀只補暗影 false，保留淨化未知與人工修正", () => {
+  const scanId = "visual-normal-test";
+  const original = record("visual-plain", { shadow: null, purified: null }, {
+    jobId: scanId, verified: false, verification: null,
+  });
+  const manual = record("visual-manual", { shadow: null, purified: null }, {
+    jobId: scanId, verified: true, verification: "human", overrides: { shadow: false },
+  });
+  const item = (pokemon: typeof original): ScanItem => ({
+    id: `visual-item-${pokemon.id}`, scanId, position: pokemon.id === original.id ? 0 : 1,
+    frame: "visual/top.jpg", appraisalFrame: "visual/iv.jpg", movesFrame: "visual/moves.jpg",
+    fingerprint: pokemon.id, pokemonId: pokemon.id, fields: { ...pokemon.fields },
+    issues: [], protectionClear: false, capturedAt: new Date().toISOString(),
+    specialReview: {
+      verdict: "normal", model: "test", reason: "兩張均無暗影效果",
+      reviewedAt: new Date().toISOString(),
+    },
+  });
+  for (const pokemon of [original, manual]) {
+    store.put("pokemon", pokemon.id, pokemon);
+    store.put("scan_items", `visual-item-${pokemon.id}`, item(pokemon));
+  }
+  assert.equal(applyStoredNormalShadowReviews(scanId), 1);
+  assert.equal(store.get<typeof original>("pokemon", original.id)?.fields.shadow, false);
+  assert.equal(store.get<typeof original>("pokemon", original.id)?.fields.purified, null);
+  assert.equal(store.get<typeof original>("pokemon", original.id)?.verified, false);
+  assert.equal(store.get<typeof manual>("pokemon", manual.id)?.fields.shadow, null);
+  assert.equal(store.get<typeof manual>("pokemon", manual.id)?.overrides.shadow, false);
+  for (const pokemon of [original, manual]) {
+    store.remove("pokemon", pokemon.id);
+    store.remove("scan_items", `visual-item-${pokemon.id}`);
+  }
+});
+
+test("已存色違複核能修復單一欄位差異，人工修正仍優先", () => {
+  const scanId = "visual-shiny-test";
+  const original = record("shiny-plain", { shiny: null }, {
+    jobId: scanId, verified: false, verification: null,
+  });
+  const manual = record("shiny-manual", { shiny: null }, {
+    jobId: scanId, verified: true, verification: "human", overrides: { shiny: false },
+  });
+  for (const [position, pokemon] of [original, manual].entries()) {
+    store.put("pokemon", pokemon.id, pokemon);
+    store.put("scan_items", `shiny-item-${pokemon.id}`, {
+      id: `shiny-item-${pokemon.id}`, scanId, position,
+      frame: "visual/top.jpg", appraisalFrame: "visual/iv.jpg",
+      fingerprint: pokemon.id, pokemonId: pokemon.id,
+      fields: { ...pokemon.fields, shiny: false }, issues: [],
+      protectionClear: false, capturedAt: new Date().toISOString(),
+      shinyReview: { verdict: "normal", model: "test", reason: "普通配色", reviewedAt: new Date().toISOString() },
+    } satisfies ScanItem);
+  }
+  assert.equal(applyStoredShinyReviews(scanId), 1);
+  assert.equal(store.get<typeof original>("pokemon", original.id)?.fields.shiny, false);
+  assert.equal(store.get<typeof original>("pokemon", original.id)?.verified, false);
+  assert.equal(store.get<typeof manual>("pokemon", manual.id)?.fields.shiny, null);
+  for (const pokemon of [original, manual]) {
+    store.remove("pokemon", pokemon.id);
+    store.remove("scan_items", `shiny-item-${pokemon.id}`);
+  }
+});
+
+test("外觀裁圖保留寶可夢右側身體，仍遮住日期徽章", async () => {
+  const file = path.join(temp, "appearance-crop.jpg");
+  await sharp({ create: { width: 600, height: 1200, channels: 3, background: "#000000" } })
+    .composite([
+      { input: { create: { width: 20, height: 20, channels: 3, background: "#ff0000" } }, left: 500, top: 400 },
+      { input: { create: { width: 20, height: 20, channels: 3, background: "#ff9900" } }, left: 500, top: 490 },
+    ])
+    .jpeg({ quality: 100 })
+    .toFile(file);
+  const crop = await upperAppearanceImage(file);
+  assert.ok(crop);
+  const { data, info } = await sharp(crop).raw().toBuffer({ resolveWithObject: true });
+  const at = (x: number, y: number) => [...data.subarray((y * info.width + x) * info.channels, (y * info.width + x) * info.channels + 3)];
+  const body = at(510, 410);
+  const date = at(510, 500);
+  assert.ok(body[0] > 180 && body[1] < 80, `身體被遮住：${body}`);
+  assert.ok(date.every((channel) => channel > 220), `日期未被遮住：${date}`);
+});
+
 test("捕獲日期只從右側同一徽章的兩行本機 OCR 讀取", () => {
   const year = { text: "2021", confidence: 1, x: 0.87, y: 0.63 };
   const monthDay = { text: "09/03", confidence: 0.5, x: 0.87, y: 0.6 };
@@ -515,6 +702,82 @@ test("離線辨識至多三隻並行，仍依掃描順序寫入", async () => {
   assert.equal(finished, true);
   assert.deepEqual(applied, [0, 1, 2, 3, 4]);
   assert.equal(peak, 3);
+});
+
+test("累積三隻完整截圖後邊截邊解析，新增截圖不重複寫入", async () => {
+  const captured = [0, 1];
+  const applied: number[] = [];
+  const started: number[] = [];
+  const stop = new AbortController();
+  const work = processGrowingInOrder({
+    list: () => [...captured],
+    startAfter: 3,
+    needsPreparation: (item) => !applied.includes(item),
+    active: () => true,
+    signal: stop.signal,
+    prepare: async (item) => {
+      started.push(item);
+      await new Promise((resolve) => setTimeout(resolve, item === 0 ? 15 : 2));
+      return item;
+    },
+    consume: async (_item, result) => { applied.push(result); },
+    concurrency: 2,
+    idleMs: 2,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 8));
+  assert.deepEqual(started, [], "未達門檻時不應呼叫 AI");
+  captured.push(2);
+  for (let attempt = 0; applied.length < 3 && attempt < 100; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.deepEqual(applied, [0, 1, 2]);
+  captured.push(3);
+  for (let attempt = 0; applied.length < 4 && attempt < 100; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  stop.abort();
+  await work;
+  assert.deepEqual(applied, [0, 1, 2, 3]);
+  assert.deepEqual(started, [0, 1, 2, 3]);
+});
+
+test("掃描時間以檢查點估算，暫停與未知總數不顯示剩餘時間", () => {
+  const start = Date.parse("2026-10-26T00:00:00.000Z");
+  const scan: Scan = {
+    id: "timing", scope: "results", status: "running", stage: "截圖中",
+    createdAt: new Date(start).toISOString(), updatedAt: new Date(start + 40_000).toISOString(),
+    scanned: 4, analyzed: 0, phase: "capture", review: 0, expected: 6,
+    sort: null, currentFrame: null, lastFingerprint: null,
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    error: null, checkpointRequired: false, iphoneUseVersion: null,
+  };
+  const items: ScanItem[] = [0, 1, 2, 3].map((position) => ({
+    id: String(position), scanId: scan.id, position,
+    frame: "a/top.jpg", movesFrame: "a/moves.jpg", appraisalFrame: "a/iv.jpg",
+    fingerprint: String(position), pokemonId: null, fields: null, issues: [],
+    protectionClear: false,
+    capturedAt: new Date(start + (position + 1) * 10_000).toISOString(),
+    analyzedAt: new Date(start + 50_000 + position * 1000).toISOString(),
+  }));
+  assert.deepEqual(scanTiming(scan, items, start + 45_000), {
+    phase: "capture", averageMs: 10_000, elapsedMs: 45_000, remainingMs: 20_000,
+  });
+  assert.equal(scanTiming({ ...scan, status: "paused" }, items, start + 45_000).remainingMs, null);
+  assert.equal(scanTiming({ ...scan, expected: null }, items, start + 45_000).remainingMs, null);
+  assert.deepEqual(scanTiming({ ...scan, phase: "analysis", scanned: 6, analyzed: 4 }, items, start + 55_000), {
+    phase: "analysis", averageMs: 1000, elapsedMs: 55_000, remainingMs: 2000,
+  });
+  assert.deepEqual(scanTiming(
+    { ...scan, phase: "analysis", status: "completed", analyzed: 4 },
+    items.map(({ analyzedAt: _legacyCheckpoint, ...item }) => item),
+    start + 55_000,
+  ), {
+    phase: "capture", averageMs: 10_000, elapsedMs: 40_000, remainingMs: null,
+  });
+  assert.equal(scanTiming({
+    ...scan,
+    status: "completed",
+    completedAt: new Date(start + 60_000).toISOString(),
+    updatedAt: new Date(start + 120_000).toISOString(),
+  }, items, start + 150_000).elapsedMs, 60_000);
 });
 
 test("離線辨識暫停後取消尚未寫入的預先請求", async () => {
@@ -719,6 +982,12 @@ test("備份包含尚未解析的三張手機截圖", async () => {
       referenceHashes: ["a".repeat(64), "b".repeat(64)],
       reviewedAt: new Date().toISOString(),
     },
+    specialReview: {
+      verdict: "normal",
+      model: "test-model",
+      reason: "兩張外觀沒有暗影或淨化效果",
+      reviewedAt: new Date().toISOString(),
+    },
     capturedAt: new Date().toISOString(),
   });
   const backup = await exportBackup();
@@ -729,6 +998,10 @@ test("備份包含尚未解析的三張手機截圖", async () => {
   await importBackup(backup);
   assert.equal(
     store.get<ScanItem>("scan_items", "raw-item")?.shinyReview?.verdict,
+    "normal",
+  );
+  assert.equal(
+    store.get<ScanItem>("scan_items", "raw-item")?.specialReview?.verdict,
     "normal",
   );
   store.remove("scan_items", "raw-item");
@@ -957,6 +1230,40 @@ test("排除背卡搜尋只輸入一次，並以完整查詢核對後才送出",
   assert.deepEqual(submitted, [[656, "exclude-background"]]);
 });
 
+test("放生搜尋勾選條件使用繁中白名單、固定順序與完整字串核對", async () => {
+  const line = (text: string) => ({ text, x: 0.18, y: 0.812, confidence: 1 });
+  const selected = ["shiny", "background", "lucky"] as const;
+  assert.equal(transferSearchQuery(25, selected), "25&!背卡&!亮晶晶&!異色");
+  assert.equal(transferSearchQuery(25, []), "25");
+  assert.equal(transferSearchQuery(25, ["lucky"]), "25&!亮晶晶");
+  assert.equal(allowedPhoneSearchQuery("25&!背卡&!亮晶晶&!異色"), true);
+  assert.equal(allowedPhoneSearchQuery("25&!異色"), true);
+  assert.equal(allowedPhoneSearchQuery("25&!異色&!亮晶晶"), false);
+  assert.equal(allowedPhoneSearchQuery("25&!背卡&!背卡"), false);
+  assert.equal(allowedPhoneSearchQuery("25&!背卡&!未知"), false);
+  assert.throws(() => transferSearchQuery(25, ["lucky", "shiny", "costume"]), /最多兩項/);
+  assert.equal(transferQueryMatches([line("Q 25&!背卡&!亮晶晶&!異色")], 25, selected), true);
+  assert.equal(transferQueryMatches([line("Q 25&!背卡&!亮晶晶")], 25, selected), false);
+  assert.equal(transferQueryMatches([line("Q 26&!背卡&!亮晶晶&!異色")], 25, selected), false);
+  assert.equal(croppedTransferQueryConsensus([
+    [line("25&!背卡&!亮晶晶&!異色")],
+    [line("25&!背卡&!亮晶晶")],
+    [line("25&!背卡&!亮晶晶&!異色")],
+  ], 25, selected), true);
+  assert.equal(croppedTransferQueryConsensus([
+    [line("25&!背卡&!亮晶晶")],
+    [line("25&!背卡&!亮晶晶")],
+    [line("25&!背卡&!亮晶晶&!異色")],
+  ], 25, selected), false);
+  const typed: string[] = [];
+  const submitted: string[] = [];
+  await typeFilteredSearch({} as IphoneMcp, 25, selected,
+    async (query) => { typed.push(query); }, async () => {},
+    async (_phone, dex, filters) => { submitted.push(transferSearchQuery(dex, filters)); });
+  assert.deepEqual(typed, ["25&!背卡&!亮晶晶&!異色"]);
+  assert.deepEqual(submitted, typed);
+});
+
 test("已知最愛可列入確認批次，未知最愛及其他特殊狀態仍排除", () => {
   const snapshot = fixture();
   const base = evaluateCollection(
@@ -1069,7 +1376,7 @@ test("v2 備份保存手機歷史，但還原後沒有放生授權", async () =>
   };
   store.put("scans", scan.id, scan);
   store.put("transfer_batches", batch.id, batch);
-  const evolution = record("backup-evolution", {}, { evolutionSilhouette: true });
+  const evolution = record("backup-evolution", {}, { evolutionSilhouette: "unknown-branch" });
   store.put("pokemon", evolution.id, evolution);
   const backup = await exportBackup();
   assert.equal(backup.version, 2);
@@ -1101,7 +1408,7 @@ test("v2 備份保存手機歷史，但還原後沒有放生授權", async () =>
   assert.equal(
     store.get<import("../src/lib/types").Pokemon>("pokemon", evolution.id)
       ?.evolutionSilhouette,
-    true,
+    "unknown-branch",
   );
   store.remove("pokemon", evolution.id);
 });

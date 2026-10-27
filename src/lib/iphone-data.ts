@@ -21,7 +21,7 @@ import {
   transferSignature,
 } from "./iphone-safety";
 import type { Scan, ScanItem, TransferBatch } from "./iphone-types";
-import { resumableTransferIndexes } from "./iphone-resume";
+import { resumableTransferIndexes, skippableTransferIndex } from "./iphone-resume";
 import { getRuntimeConfig } from "./runtime-config";
 import type { Pokemon } from "./types";
 
@@ -246,6 +246,47 @@ export function resumeTransferBatch(batchId: string) {
       status: "approved",
       selectedPokemonId:
         batch.mode === "single" ? entries[indexes[0]].pokemonId : null,
+      approvedAt: now(),
+      updatedAt: now(),
+      error: null,
+    };
+    assertBatchFresh(next);
+    put("transfer_batches", next.id, next);
+    return next;
+  });
+}
+
+export function skipCurrentTransferEntry(batchId: string) {
+  return transaction(() => {
+    const batch = get<TransferBatch>("transfer_batches", batchId);
+    if (!batch || batch.status !== "paused")
+      throw new Error("只有已暫停的放生批次可以跳過目前個體");
+    if (activeScan() || activeBatch())
+      throw new Error("手機正在處理其他工作");
+    const index = skippableTransferIndex(batch);
+    if (index === null)
+      throw new Error("目前個體無法安全跳過；已送出或結果不明者請先在遊戲查證");
+    const records = new Map(listPokemon().map((pokemon) => [pokemon.id, pokemon]));
+    const snapshot = getSnapshot();
+    const entries = batch.entries.map((entry, position) => {
+      if (position === index)
+        return { ...entry, reason: `使用者選擇跳過（尚未送出放生）：${entry.reason}` };
+      if (entry.status !== "pending") return entry;
+      const pokemon = records.get(entry.pokemonId);
+      const exclusion = pokemon
+        ? transferExclusion(pokemon, snapshot)
+        : "收藏資料已不存在";
+      return exclusion
+        ? { ...entry, status: "skipped" as const, reason: `已不符合放生條件：${exclusion}` }
+        : entry;
+    });
+    if (!entries.some((entry) => entry.status === "pending"))
+      throw new Error("其餘個體都已不符合放生條件，沒有可以繼續的名單");
+    const next: TransferBatch = {
+      ...batch,
+      entries,
+      status: "approved",
+      selectedPokemonId: null,
       approvedAt: now(),
       updatedAt: now(),
       error: null,

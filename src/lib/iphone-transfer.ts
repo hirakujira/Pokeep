@@ -19,20 +19,26 @@ import { effective, type Pokemon, type Snapshot } from "./types";
 import { all, get, getSettings, getSnapshot, listPokemon, now, put, transaction } from "./store";
 import { reevaluate } from "./evaluate";
 import type { Scan, ScanItem, TransferBatch, TransferEntry } from "./iphone-types";
+import {
+  defaultTransferSearchFilters,
+  transferSearchQuery,
+  type TransferSearchFilter,
+} from "./transfer-search-filters";
 import { readLocalOcr } from "./local-ocr";
 import {
   assertUniqueDexCp,
   backgroundQuery,
   backgroundQueryMatches,
+  backgroundSearchDecision,
   collectionSearchState,
   cpCandidates,
   croppedBackgroundTextCompatible,
-  croppedNonBackgroundConsensus,
+  croppedTransferQueryConsensus,
   nonBackgroundQuery,
-  nonBackgroundQueryMatches,
   searchQueryMatches,
   searchResultCount,
   standardTransferDialog,
+  transferQueryMatches,
 } from "./iphone-transfer-search";
 
 class SkippedCandidate extends Error {}
@@ -111,16 +117,22 @@ async function waitForSearchScreen(phone: IphoneMcp) {
 }
 
 /** Full-frame OCR sometimes drops the thin !. Re-read only the search text. */
-export async function confirmNonBackgroundQuery(imagePath: string, lines: Awaited<ReturnType<typeof readLocalOcr>>[number], dex: number) {
-  if (nonBackgroundQueryMatches(lines, dex)) return true;
-  if (backgroundQueryMatches(lines, dex) &&
+export async function confirmNonBackgroundQuery(
+  imagePath: string,
+  lines: Awaited<ReturnType<typeof readLocalOcr>>[number],
+  dex: number,
+  extras: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
+) {
+  if (transferQueryMatches(lines, dex, extras)) return true;
+  const onlyBackground = extras.length === 1 && extras[0] === "background";
+  if (onlyBackground && backgroundQueryMatches(lines, dex) &&
       await hasBackgroundExclamationGlyph(imagePath)) return true;
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) return false;
   const region = {
-    left: Math.round(metadata.width * 0.22),
+    left: Math.round(metadata.width * (extras.length ? 0.2 : 0.22)),
     top: Math.round(metadata.height * 0.155),
-    width: Math.round(metadata.width * 0.55),
+    width: Math.round(metadata.width * (extras.length ? 0.67 : 0.55)),
     height: Math.round(metadata.height * 0.052),
   };
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), "pokekeep-query-"));
@@ -136,22 +148,25 @@ export async function confirmNonBackgroundQuery(imagePath: string, lines: Awaite
         .grayscale().normalise().sharpen().png().toFile(sharpened),
     ]);
     const cropped = await readLocalOcr([plain, normalized, sharpened]);
-    if (croppedNonBackgroundConsensus(cropped, dex)) return true;
-    return croppedBackgroundTextCompatible(cropped, dex) &&
+    if (croppedTransferQueryConsensus(cropped, dex, extras)) return true;
+    return onlyBackground && croppedBackgroundTextCompatible(cropped, dex) &&
       await hasBackgroundExclamationGlyph(imagePath);
   } finally {
     await fs.rm(folder, { recursive: true, force: true });
   }
 }
 
-async function submitSearch(phone: IphoneMcp, dex: number, background: boolean | "exclude-background") {
+async function submitSearch(
+  phone: IphoneMcp, dex: number, background: boolean | "exclude-background",
+  extras: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
+) {
   const screen = await observeGameForeground(phone, await observe(phone));
   if (!screen.image?.path) throw new Error("搜尋輸入後沒有可讀畫面");
   const [lines] = await readLocalOcr([screen.image.path]);
   const matches = background === "exclude-background"
-    ? await confirmNonBackgroundQuery(screen.image.path, lines, dex)
+    ? await confirmNonBackgroundQuery(screen.image.path, lines, dex, extras)
     : background ? backgroundQueryMatches(lines, dex) : searchQueryMatches(lines, dex);
-  if (!matches) throw new Error("無法確認搜尋欄包含圖鑑編號與 !背卡，尚未送出搜尋");
+  if (!matches) throw new Error("無法確認搜尋欄包含完整圖鑑編號與所選排除條件，尚未送出搜尋");
   await tapFast(phone, screen, transferPoint.confirmSearch);
 }
 
@@ -178,6 +193,7 @@ async function findCandidateByDexCp(
   batchId: string,
   index: number,
   reuseSearch: boolean,
+  extras: readonly TransferSearchFilter[],
 ) {
   if (!current.image?.path) throw new Error("寶可夢盒子沒有可讀截圖");
   const [initialLines] = await readLocalOcr([current.image.path]);
@@ -186,28 +202,38 @@ async function findCandidateByDexCp(
     throw new Error("請先在寶可夢盒子列表開始逐隻放生");
   let result = current;
   let lines = initialLines;
-  if (!reuseSearch || searchState !== "active" || !await confirmNonBackgroundQuery(current.image.path, lines, dex)) {
-    if (searchState === "active")
-      await tapFast(phone, current, transferPoint.clearSearch);
-    await tapFast(phone, current, transferPoint.search);
-    await typeNonBackgroundSearch(phone, dex);
+  if (!extras.includes("background")) {
+    result = await confirmTargetHasNoBackground(phone, current, searchState, dex, cp);
+    if (!result.image?.path) throw new Error("背卡檢查沒有可讀截圖");
+    [lines] = await readLocalOcr([result.image.path]);
+  }
+  if (!result.image?.path) throw new Error("搜尋畫面沒有可讀截圖");
+  const currentSearchState = collectionSearchState(lines);
+  if (!currentSearchState)
+    throw new Error("背卡檢查後無法確認仍在寶可夢盒子，尚未放生");
+  if (!extras.includes("background") || !reuseSearch || currentSearchState !== "active" ||
+      !await confirmNonBackgroundQuery(result.image.path, lines, dex, extras)) {
+    if (currentSearchState === "active")
+      await tapFast(phone, result, transferPoint.clearSearch);
+    await tapFast(phone, result, transferPoint.search);
+    await typeFilteredSearch(phone, dex, extras);
     result = await observe(phone);
     if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
     [lines] = await readLocalOcr([result.image.path]);
   }
   if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
-  if (!await confirmNonBackgroundQuery(result.image.path, lines, dex))
-    throw new Error("搜尋欄未顯示完整圖鑑編號與排除背卡條件，尚未放生");
+  if (!await confirmNonBackgroundQuery(result.image.path, lines, dex, extras))
+    throw new Error("搜尋欄未顯示完整圖鑑編號與所選排除條件，尚未放生");
   const count = searchResultCount(lines);
   if (count === null)
     throw new Error("無法讀取圖鑑編號的搜尋結果數量");
   if (count === 0)
-    throw new SkippedCandidate("搜尋結果沒有此物種，已跳過且未放生");
+    throw new SkippedCandidate("目前搜尋排除條件下沒有此物種，已跳過且未放生");
   let previous = "";
   for (let attempt = 0; attempt < 20; attempt++) {
     if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
-    if (!await confirmNonBackgroundQuery(result.image.path, lines, dex))
-      throw new Error("搜尋結果已失去排除背卡條件，尚未放生");
+    if (!await confirmNonBackgroundQuery(result.image.path, lines, dex, extras))
+      throw new Error("搜尋結果已失去所選排除條件，尚未放生");
     const visible = cpCandidates(lines);
     const matches = visible.filter((candidate) => candidate.cp === cp);
     if (matches.length > 1)
@@ -244,6 +270,51 @@ async function findCandidateByDexCp(
     [lines] = await readLocalOcr([result.image.path]);
   }
   throw new SkippedCandidate("無法確認目標位於搜尋結果，已跳過且未放生");
+}
+
+/** An unchecked !背卡 changes the query, never the background protection. */
+async function confirmTargetHasNoBackground(
+  phone: IphoneMcp,
+  current: Awaited<ReturnType<typeof observe>>,
+  searchState: "empty" | "active",
+  dex: number,
+  cp: number,
+) {
+  if (searchState === "active")
+    await tapFast(phone, current, transferPoint.clearSearch);
+  await tapFast(phone, current, transferPoint.search);
+  await typeBackgroundSearch(phone, dex);
+  let result = await observe(phone);
+  const seen = new Set<string>();
+  let previous = "";
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (!result.image?.path) throw new Error("背卡搜尋沒有可讀截圖");
+    const [lines] = await readLocalOcr([result.image.path]);
+    const decision = backgroundSearchDecision(lines, dex, cp);
+    if (decision === "protected")
+      throw new SkippedCandidate("同圖鑑編號與 CP 的寶可夢有背卡，已跳過且未放生");
+    if (decision === "clear") return result;
+    if (!backgroundQueryMatches(lines, dex))
+      throw new Error("無法確認背卡檢查的搜尋欄，尚未放生");
+    const count = searchResultCount(lines);
+    if (count === null) throw new Error("無法讀取背卡搜尋結果數量，尚未放生");
+    const visible = cpCandidates(lines);
+    const signature = visible.map((candidate) => `${candidate.cp}:${candidate.x}:${candidate.y}`).join("|");
+    if (!signature || signature === previous)
+      throw new Error("背卡搜尋無法確認所有結果，尚未放生");
+    previous = signature;
+    for (const candidate of visible)
+      seen.add(`${candidate.cp}:${candidate.x}:${candidate.y}`);
+    if (seen.size >= count) return result;
+    const swiped = await phone.call<{ observation?: Awaited<ReturnType<typeof observe>> }>(
+      "swipe", {
+        direction: "up", observation_id: result.observation_id,
+        verify: false, observe: "screenshot",
+      },
+    );
+    result = swiped.observation?.image?.path ? swiped.observation : await observe(phone);
+  }
+  throw new Error("背卡搜尋結果過多，無法確認目標沒有背卡，尚未放生");
 }
 
 function completeBoxIds() {
@@ -297,6 +368,21 @@ export async function typeNonBackgroundSearch(
   await waitForScreen(phone);
   await inject(query);
   await submit(phone, dex, "exclude-background");
+}
+
+export async function typeFilteredSearch(
+  phone: IphoneMcp,
+  dex: number,
+  extras: readonly TransferSearchFilter[],
+  inject: (query: string) => Promise<void> = injectSearchText,
+  waitForScreen: (phone: IphoneMcp) => Promise<void> = waitForSearchScreen,
+  submit: (phone: IphoneMcp, dex: number, extras: readonly TransferSearchFilter[]) => Promise<void> =
+    (phone, dex, extras) => submitSearch(phone, dex, "exclude-background", extras),
+) {
+  const query = transferSearchQuery(dex, extras);
+  await waitForScreen(phone);
+  await inject(query);
+  await submit(phone, dex, extras);
 }
 
 export function authorizedTransferIndex(batch: TransferBatch) {
@@ -385,7 +471,7 @@ export async function runTransferBatch(
       }
       batch = setEntry(batch.id, index, {
         status: "searching",
-        reason: "正在搜尋無背卡的唯一 CP",
+        reason: `正在搜尋 ${transferSearchQuery(identity.dex, batch.searchExclusions || defaultTransferSearchFilters)} 的唯一 CP`,
       });
       let found: Awaited<ReturnType<typeof findCandidateByDexCp>>;
       for (let attempt = 0; ; attempt++) {
@@ -394,6 +480,7 @@ export async function runTransferBatch(
           found = await findCandidateByDexCp(
             phone, current, identity.dex, identity.cp, batch.id, index,
             attempt === 0 && reusableDex === identity.dex,
+            batch.searchExclusions || defaultTransferSearchFilters,
           );
           await tapFast(phone, found.observation, found.point);
           break;

@@ -1,6 +1,8 @@
 // PvPoke identifiers and a few Game Master names have no zh-Hant entry in the
 // current Pokémon GO text bundle. Keep these display aliases separate from the
 // stored move identifiers used by battle calculations.
+import { typeNames } from "./type-names";
+
 const chineseAliases: Record<string, string> = {
   AURA_WHEEL_ELECTRIC: "氣場輪（電）",
   BEAK_BLAST: "鳥嘴加農炮",
@@ -39,6 +41,10 @@ export function moveName(
   for (const key of variants) {
     const translated = names[key];
     if (translated && hasChinese(translated)) return translated;
+  }
+  if (id.startsWith("HIDDEN_POWER_")) {
+    const type = id.slice("HIDDEN_POWER_".length).toLowerCase();
+    if (typeNames[type]) return `覺醒力量（${typeNames[type]}）`;
   }
   return chineseAliases[id] || compactAliases[variants[1]] || names[id] || value;
 }

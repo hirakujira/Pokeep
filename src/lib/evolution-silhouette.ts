@@ -9,23 +9,86 @@ import type { OcrLine } from "./local-ocr";
 export async function evolutionSilhouette(
   file: string,
   lines: OcrLine[],
-): Promise<boolean | null> {
+  ambiguousOutcome = false,
+): Promise<boolean | "unavailable" | "unknown-branch" | null> {
   const evolves = lines.filter(
     (line) =>
       line.text.trim() === "進化" &&
-      line.confidence >= 0.4 &&
-      line.x > 0.22 &&
+      line.confidence >= 0.25 &&
+      line.x > 0.15 &&
       line.x < 0.42 &&
       line.y > 0.15 &&
       line.y < 0.75,
   );
-  if (!evolves.length) return null;
   const meta = await sharp(file).metadata();
   if (!meta.width || !meta.height || meta.width >= meta.height) return null;
+  // Vision sometimes reads the candy price but drops the evolve label. In the
+  // supported portrait layout, the evolve button follows the power-up button.
+  // Require both a price and a colored button before using that fallback.
+  if (!evolves.length) {
+    for (const powerUp of lines.filter((line) =>
+      line.text.trim() === "強化" && line.confidence >= 0.3 &&
+      line.x > 0.15 && line.x < 0.42
+    )) {
+      const y = powerUp.y - 0.092;
+      if (y <= 0.15 || y >= 0.75 ||
+          lines.some((line) => Math.abs(line.y - y) < 0.035 &&
+            /(超級|極巨|淨化)/.test(line.text)) ||
+          !lines.some((line) => Math.abs(line.y - y) < 0.035 &&
+            line.x > 0.5 && line.x < 0.9 && /\d/.test(line.text)))
+        continue;
+      const region = {
+        left: Math.round(meta.width * 0.36),
+        top: Math.round(meta.height * (1 - y - 0.02)),
+        width: Math.round(meta.width * 0.07),
+        height: Math.round(meta.height * 0.04),
+      };
+      if (region.top < 0 || region.top + region.height > meta.height) continue;
+      const { data, info } = await sharp(file)
+        .extract(region).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      let buttonPixels = 0;
+      for (let offset = 0; offset < data.length; offset += info.channels) {
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        if ((green > 120 && green > red * 1.15 && green > blue * 0.9) ||
+            (red > 190 && red > green * 1.12 && blue > 135))
+          buttonPixels++;
+      }
+      if (buttonPixels / (region.width * region.height) >= 0.5)
+        evolves.push({ text: "進化", confidence: 0.25, x: 0.29, y });
+    }
+  }
+  if (!evolves.length) {
+    // A fully visible moves panel with the new-attack button immediately
+    // below power-up leaves no room for an evolution row. Missing OCR text
+    // alone is insufficient evidence that the button does not exist.
+    const powerUps = lines.filter((line) =>
+      line.text.trim() === "強化" && line.confidence >= 0.3 &&
+      line.x > 0.15 && line.x < 0.42,
+    );
+    const newMoves = lines.filter((line) =>
+      line.text.trim() === "新攻擊招式" && line.confidence >= 0.3 &&
+      line.x > 0.1 && line.x < 0.42,
+    );
+    if (powerUps.some((powerUp) => newMoves.some((newMove) => {
+      const gap = powerUp.y - newMove.y;
+      return gap >= 0.27 && gap <= 0.36;
+    }))) return "unavailable";
+    return null;
+  }
+  // The question mark is a visible outcome, distinct from an unreadable icon.
+  if (evolves.some((evolve) => lines.some((line) =>
+    /^[?？]$/.test(line.text.trim()) && line.confidence >= 0.25 &&
+    line.x > 0.14 && line.x < 0.24 &&
+    Math.abs(line.y - evolve.y) < 0.04,
+  ))) return "unknown-branch";
   let sawColored = false;
   let sawUnknown = false;
   for (const evolve of evolves) {
-    const left = Math.round(meta.width * (evolve.x - 0.12));
+    // Vision's x is the centre of recognized text, sometimes including the
+    // icon. The icon itself stays at the same place in this portrait layout.
+    const left = Math.round(meta.width * 0.17);
     const top = Math.round(meta.height * (1 - evolve.y - 0.058));
     const width = Math.round(meta.width * 0.11);
     const height = Math.round(meta.height * 0.07);
@@ -104,8 +167,9 @@ export async function evolutionSilhouette(
     // Disabled evolution buttons are pink. Their unregistered silhouette is
     // the same hue as the button, only darker; registered sprites retain color.
     if (
-      pink / area >= 0.8 && mutedPink / area >= 0.04 &&
-      otherDark / area <= 0.02
+      (pink + mutedPink) / area >= 0.85 &&
+      mutedPink / area >= 0.04 &&
+      otherDark / area <= 0.02 && colorful / area <= 0.02
     ) return true;
     // Some item-based evolution buttons use a deeper magenta than the
     // multi-branch calibration. The unregistered icon is one dark-magenta
@@ -123,9 +187,12 @@ export async function evolutionSilhouette(
     // Small species silhouettes cover less of the button than the initial
     // calibration sample (e.g. Smoliv's next evolution is about 6.8%).
     if (darkGreen / area >= 0.06 && colorful / area <= 0.01) return true;
-    if (colorful / area >= 0.025 && darkGreen / area < 0.08)
+    if ((colorful / area >= 0.025 && darkGreen / area < 0.08) ||
+        (otherDark / area >= 0.025 && darkGreen / area < 0.04))
       sawColored = true;
     else sawUnknown = true;
   }
-  return sawUnknown ? null : sawColored ? false : null;
+  // A '?' for a random evolution outcome is not a registered sprite. The
+  // species data distinguishes these ambiguous branches from a single result.
+  return sawUnknown ? null : sawColored && !ambiguousOutcome ? false : null;
 }

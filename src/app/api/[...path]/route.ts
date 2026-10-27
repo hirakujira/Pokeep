@@ -36,6 +36,7 @@ import {
   discardIncompleteScans,
   previewBatch,
   resumeTransferBatch,
+  skipCurrentTransferEntry,
   scanItems,
   scans,
   updateScan,
@@ -47,6 +48,8 @@ import { pokemonSprite } from "@/lib/sprites";
 import { moveName } from "@/lib/move-names";
 import { publicRuntimeConfig, saveRuntimeConfig } from "@/lib/runtime-config";
 import { clearPokemonData } from "@/lib/clear-pokemon-data";
+import { scanTiming } from "@/lib/scan-timing";
+import { defaultTransferSearchFilters, transferSearchQuery } from "@/lib/transfer-search-filters";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,6 +107,7 @@ async function handle(req: NextRequest, ctx: Context) {
       version: string | null;
     }>("settings", "iphone-worker");
     const selectedScan = activeScan() || scans()[0] || null;
+    const selectedItems = selectedScan ? scanItems(selectedScan.id) : [];
     return json({
       worker:
         worker && Date.now() - Date.parse(worker.updatedAt) < 15000
@@ -112,7 +116,8 @@ async function handle(req: NextRequest, ctx: Context) {
       scan: selectedScan
         ? {
             ...selectedScan,
-            review: scanItems(selectedScan.id).filter((item) => {
+            timing: scanTiming(selectedScan, selectedItems),
+            review: selectedItems.filter((item) => {
               const record = item.pokemonId
                 ? get<Pokemon>("pokemon", item.pokemonId)
                 : null;
@@ -150,7 +155,7 @@ async function handle(req: NextRequest, ctx: Context) {
     const worker = get<{ updatedAt: string }>("settings", "iphone-worker");
     if (!worker || Date.now() - Date.parse(worker.updatedAt) > 15000)
       throw new Error(
-        "iPhone 背景服務尚未啟動，請用 npm run dev 或 npm start 啟動 Pokekeep",
+        "iPhone 背景服務尚未啟動，請用 npm run dev 或 npm start 啟動 Pokéep",
       );
     return json(createScan(scope), 201);
   }
@@ -246,9 +251,16 @@ async function handle(req: NextRequest, ctx: Context) {
     return json(approved);
   }
   if (method === "POST" && route === "transfers/execute-many") {
-    const { pokemonIds } = z
-      .object({ pokemonIds: z.array(z.string()).min(1).max(1000) })
+    const { pokemonIds, searchExclusions } = z
+      .object({
+        pokemonIds: z.array(z.string()).min(1).max(1000),
+        searchExclusions: z.array(z.enum([
+          "background", "lucky", "shiny", "costume", "shadow", "purified",
+          "favorite", "legendary", "mythical", "ultrabeast", "perfect",
+        ])).max(3).default(defaultTransferSearchFilters),
+      })
       .parse(await body(req));
+    transferSearchQuery(1, searchExclusions);
     if (new Set(pokemonIds).size !== pokemonIds.length)
       throw new Error("放生名單含有重複個體");
     const approved = transaction(() => {
@@ -268,6 +280,7 @@ async function handle(req: NextRequest, ctx: Context) {
       const next: TransferBatch = {
         ...preview,
         mode: "bulk",
+        searchExclusions,
         entries,
         status: "approved",
         selectedPokemonId: null,
@@ -351,6 +364,8 @@ async function handle(req: NextRequest, ctx: Context) {
     }
     if (method === "POST" && parts[2] === "resume")
       return json(resumeTransferBatch(batch.id));
+    if (method === "POST" && parts[2] === "skip-current")
+      return json(skipCurrentTransferEntry(batch.id));
     if (method === "POST" && parts[2] === "stop") {
       if (!["approved", "running", "paused"].includes(batch.status))
         throw new Error("此批次無法停止");
@@ -456,7 +471,7 @@ async function handle(req: NextRequest, ctx: Context) {
         verified: z.boolean().optional(),
         locked: z.boolean().optional(),
         owned: z.boolean().optional(),
-        evolutionSilhouette: z.boolean().nullable().optional(),
+        evolutionSilhouette: z.union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")]).nullable().optional(),
         maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
         dismissCandidates: z.boolean().optional(),
       })

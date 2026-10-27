@@ -22,7 +22,7 @@ func recognize(_ path: String) throws -> [Line] {
     let url = URL(fileURLWithPath: path)
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
           let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-        throw NSError(domain: "PokekeepOCR", code: 1,
+        throw NSError(domain: "PokeepOCR", code: 1,
                       userInfo: [NSLocalizedDescriptionKey: "無法讀取截圖"])
     }
     let request = VNRecognizeTextRequest()
