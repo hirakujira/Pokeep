@@ -10,7 +10,8 @@ import {
 } from "../types";
 import { specialStateFromMoves } from "../iphone-safety";
 import { typeName } from "../type-names";
-import { assess, collectionForm } from "./assess";
+import { assess } from "./assess";
+import { collectionForm, holdsSameForm, visualForm } from "./forms";
 import type { CombatPick } from "./move-training";
 import {
   categorize,
@@ -60,7 +61,7 @@ function pickHighIv(confirmed: Pokemon[], snapshot: Snapshot | null, add: AddPic
       f.costume !== null || p.maxStatus == null ||
       specialStateFromMoves(f).conflict
     ) continue;
-    const key = `${f.speciesId}/${collectionForm(f, s)}/${f.shadow}`;
+    const key = `${f.speciesId}/${collectionForm(f, s, snapshot!)}/${f.shadow}`;
     highIvGroups.set(key, [...(highIvGroups.get(key) || []), p]);
   }
   const highIvPeers = new Map<string, string>();
@@ -166,6 +167,7 @@ function groupEvolutionCandidates(living: Pokemon[], snapshot: Snapshot | null) 
       ]);
       continue;
     }
+    const form = species ? visualForm(f, species, snapshot)?.id ?? null : null;
     const evolutions = species?.evolutions.filter(
       (evolution) => !evolution.gender || evolution.gender === f.gender,
     ) || [];
@@ -178,9 +180,7 @@ function groupEvolutionCandidates(living: Pokemon[], snapshot: Snapshot | null) 
       continue;
     }
     const missing = options.filter(({ target }) =>
-      !living.some((peer) =>
-        effective(peer).speciesId === target.id,
-      ),
+      !holdsSameForm(living, target, form, snapshot),
     );
     if (missing.length !== options.length) {
       if (missing.length) needsReview.add(p.id);
@@ -191,7 +191,7 @@ function groupEvolutionCandidates(living: Pokemon[], snapshot: Snapshot | null) 
     // evolution automatically when none of its immediate forms is in the
     // imported, still-owned collection. This recommendation does not authorize
     // a transfer, even if the phone scan stopped before covering the whole box.
-    const key = `${f.speciesId}/${options.map(({ target }) => target.id).sort().join(",")}`;
+    const key = `${f.speciesId}/${form}/${options.map(({ target }) => target.id).sort().join(",")}`;
     groups.set(key, [
       ...(groups.get(key) || []),
       { p, options },

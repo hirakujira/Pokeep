@@ -10,6 +10,7 @@ import {
 import { specialStateFromMoves } from "../iphone-safety";
 import { moveName } from "../move-names";
 import { moveId, moveTraining, type CombatPick } from "./move-training";
+import { holdsSameForm, visualForm } from "./forms";
 import { reviewReason } from "./review";
 
 export type Pick = { reason: string; peers: string[] } & CombatPick;
@@ -74,13 +75,13 @@ function unresolvedMissingEvolution(
     return false;
   const fields = effective(pokemon);
   const species = fields.speciesId ? snapshot.species[fields.speciesId] : null;
-  return Boolean(species?.evolutions.some((evolution) =>
-    (!evolution.gender || evolution.gender === fields.gender) &&
-    snapshot.species[evolution.id] &&
-    !living.some((peer) =>
-      effective(peer).speciesId === evolution.id,
-    ),
-  ));
+  if (!species) return false;
+  const form = visualForm(fields, species, snapshot)?.id ?? null;
+  return species.evolutions.some((evolution) => {
+    const target = snapshot.species[evolution.id];
+    return (!evolution.gender || evolution.gender === fields.gender) &&
+      Boolean(target) && !holdsSameForm(living, target, form, snapshot);
+  });
 }
 function comparedWith(id: string, picks: Pick[], d: CollectionDecisions) {
   const peers = [...new Set(picks.flatMap((x) => x.peers))];

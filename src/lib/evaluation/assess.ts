@@ -10,7 +10,8 @@ import {
 } from "../types";
 import { now } from "../store";
 import { moveName } from "../move-names";
-import { localizeForm, normalFormTexts } from "../species-names";
+import { localizeForm } from "../species-names";
+import { collectionForm, visualForm } from "./forms";
 import { combatPower, inferLevels, powerCost, rankIV } from "./stats";
 import { evolutionPaths, type EvolutionPath } from "./evolution";
 import { cycleDps, raidBenchmarks } from "./raid";
@@ -46,21 +47,16 @@ function baseAnalysis(p: Pokemon, snapshot: Snapshot | null): Analysis {
     evaluatedAt: now(),
   };
 }
-// A form-specific species ID already names its form; scanned labels for the
-// same form vary ("攻擊形態", "(Attack)", "attack") and must not split groups.
-export function collectionForm(f: Fields, s: Species) {
-  if (s.form) return s.form;
-  return !f.form || normalFormTexts.includes(f.form.trim().toLowerCase()) ? "normal" : f.form;
-}
 // Regional variants are ordinary catches, so they do not earn a special form
 // slot; they still stay separate from the original form in every group.
 const regionalForms = new Set([
   "(Alolan)", "(Galarian)", "(Hisuian)", "(Paldean)", "(Aqua)", "(Blaze)", "(Combat)",
 ]);
-function collectionKeys(f: Fields, s: Species) {
+function collectionKeys(f: Fields, s: Species, snapshot: Snapshot) {
   const keys: Analysis["collectionKeys"] = [];
   const costume = collectionCostume(f.speciesId, f.costume);
-  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm(f, s)}/${costume || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
+  const visual = visualForm(f, s, snapshot);
+  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm(f, s, snapshot)}/${costume || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
   const add = (kind: string, label: string) => keys.push({ key: `${prefix}/${kind}`, label });
   if (f.shiny) add("shiny", "色違");
   if (costume) add("costume", `服裝「${costume}」`);
@@ -68,6 +64,7 @@ function collectionKeys(f: Fields, s: Species) {
     const form = s.form.replace(/^\((.+)\)$/, "$1");
     add("form", `形態「${localizeForm(form, s.id) ?? form}」`);
   }
+  if (visual && visual.id !== "normal") add("form", `形態「${visual.label}」`);
   const iv = [f.ivAtk, f.ivDef, f.ivSta];
   if (iv.every((v) => v === 15)) add("perfect", "IV 全滿");
   if (iv.every((v) => v === 0)) add("zero", "IV 全零");
@@ -245,7 +242,7 @@ export function assess(p: Pokemon, snapshot: Snapshot | null): Analysis {
   }
   if (f.shadow === null || f.shiny === null || f.purified === null)
     a.warnings.push("暗影、淨化或色違狀態未確認");
-  a.collectionKeys = collectionKeys(f, s);
+  a.collectionKeys = collectionKeys(f, s, snapshot);
   const iv = [f.ivAtk, f.ivDef, f.ivSta];
   if (iv.some((v) => v === null) || f.cp === null) {
     a.reasons.push("尚缺 CP 或完整攻防體 IV");

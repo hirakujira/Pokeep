@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { fixture, record, species, settings } from "./fixtures";
-import { emptyFields, settingsSchema, type Observation } from "../src/lib/types";
+import { emptyFields, settingsSchema, type Observation, type Pokemon } from "../src/lib/types";
 import type { ScanItem } from "../src/lib/iphone-types";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pogo-test-"));
@@ -541,6 +541,39 @@ test("最終進化型的超級進化或原始回歸剪影推薦同類最佳一�
   const kyogre = record("primal", { speciesId: "kyogre", favorite: false }, { evolutionSilhouette: true });
   assert.equal(evaluateCollection([kyogre], snapshot, settings)[0].analysis?.reasons[0],
     "原始回歸按鈕顯示未登錄剪影；同類中優先原始回歸這隻");
+});
+
+test("外觀形態（花色、海域）各算一個形態收藏代表，進化也依形態判斷", () => {
+  const snapshot = fixture();
+  snapshot.visualForms = { 10: [{ id: "red", label: "紅花" }, { id: "blue", label: "藍花" }] };
+  const flower = (id: string, form: string | null, other: Partial<Pokemon> = {}) =>
+    record(id, { favorite: false, form }, other);
+  const byId = new Map(evaluateCollection(
+    [flower("red-label", "紅花"), flower("red-id", "red"), flower("blue", "藍花"), flower("plain", null)],
+    snapshot, { ...settings, rareRepresentatives: 1 },
+  ).map((p) => [p.id, p.analysis!]));
+  assert.deepEqual(byId.get("blue")!.collectionKeys.map((k) => k.label), ["形態「藍花」"]);
+  assert.equal(byId.get("blue")!.category, "collect");
+  // The stored label and the stored ID name the same flower, so they share one slot.
+  assert.equal(["red-label", "red-id"].filter((id) =>
+    byId.get(id)!.reasons.includes("形態「紅花」收藏代表（同組前 1 名）")).length, 1);
+  assert.deepEqual(byId.get("plain")!.collectionKeys, []);
+
+  snapshot.species.caterpie.evolutions = [{ id: "metapod", candy: 12, condition: null }];
+  snapshot.species.metapod = species("metapod");
+  const blueBud = flower("blue-bud", "藍花", { evolutionSilhouette: true });
+  const redBud = flower("red-bud", "紅花", { evolutionSilhouette: true });
+  const evolved = (form: string) => record(`evolved-${form}`, { speciesId: "metapod", form });
+  const categories = (pokemon: Pokemon[]) => evaluateCollection(
+    pokemon, snapshot, settings, new Set(pokemon.map((p) => p.id)),
+  ).map((p) => p.analysis?.category);
+  assert.equal(categories([blueBud, evolved("紅花")])[0], "evolve");
+  assert.equal(categories([blueBud, evolved("blue")])[0], "review");
+  assert.deepEqual(categories([blueBud, redBud]), ["evolve", "evolve"]);
+  const undecided = evaluateCollection(
+    [flower("blue-unknown", "藍花"), evolved("紅花")], snapshot, settings,
+  )[0];
+  assert.match(undecided.analysis?.reasons[0] || "", /進化剪影尚未判定/);
 });
 
 test("可進化個體比較持有糖果與畫面成本，分支成本不同時分開列出", () => {
