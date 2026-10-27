@@ -21,6 +21,7 @@ export function iphoneStatus() {
   }>("settings", "iphone-worker");
   const selectedScan = activeScan() || scans()[0] || null;
   const selectedItems = selectedScan ? scanItems(selectedScan.id) : [];
+  const latestBatch = batches()[0];
   return json({
     worker:
       worker && Date.now() - Date.parse(worker.updatedAt) < 15000
@@ -40,9 +41,10 @@ export function iphoneStatus() {
           }).length,
         }
       : null,
-    batch: activeBatch() || batches()[0] || null,
+    // Hiding the latest batch clears the panel instead of surfacing an older one.
+    batch: activeBatch() || (latestBatch?.hiddenAt ? null : latestBatch) || null,
     resumableBatches: batches()
-      .filter((batch) => resumableTransferIndexes(batch).length > 0)
+      .filter((batch) => !batch.hiddenAt && resumableTransferIndexes(batch).length > 0)
       .slice(0, 5)
       .map((batch) => {
         try {

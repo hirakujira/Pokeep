@@ -76,6 +76,7 @@ export async function transferById(req: NextRequest, id: string, rest: string[])
   if (method === "POST" && action === "skip-current")
     return json(skipCurrentTransferEntry(batch.id));
   if (method === "POST" && action === "stop") return json(stopBatch(batch));
+  if (method === "POST" && action === "hide") return json(hideBatch(batch.id));
 }
 function approveFromCompletedScan(pokemonId: string) {
   return transaction(() => {
@@ -202,4 +203,14 @@ function stopBatch(batch: TransferBatch) {
   };
   put("transfer_batches", batch.id, stopped);
   return stopped;
+}
+function hideBatch(batchId: string) {
+  return transaction(() => {
+    const latest = get<TransferBatch>("transfer_batches", batchId)!;
+    if (["approved", "running"].includes(latest.status))
+      throw new Error("執行中的放生批次不能清除紀錄");
+    const hidden = { ...latest, hiddenAt: now() };
+    put("transfer_batches", batchId, hidden);
+    return hidden;
+  });
 }

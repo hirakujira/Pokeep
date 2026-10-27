@@ -496,6 +496,63 @@ test("暫停批次可跳過當前失敗個體並續跑，已送出及結果不�
   for (const pokemon of [failed, next, noLongerEligible]) store.remove("pokemon", pokemon.id);
   store.remove("transfer_batches", batch.id);
 });
+test("放生紀錄可逐筆從畫面清除並保留於資料與備份，執行中批次不得清除", async () => {
+  const stamp = new Date().toISOString();
+  const paused: TransferBatch = {
+    id: "hide-paused-batch",
+    scanId: "hide-scan",
+    createdAt: stamp,
+    updatedAt: stamp,
+    status: "paused",
+    mode: "bulk",
+    selectedPokemonId: null,
+    signature: "",
+    entries: [{ pokemonId: "hide-pending", status: "pending", reason: null }],
+    error: null,
+    approvedAt: null,
+  };
+  const latest: TransferBatch = { ...paused, id: "hide-latest-batch", status: "completed", entries: [] };
+  for (const batch of [paused, latest]) store.put("transfer_batches", batch.id, batch);
+  const phone = async () =>
+    (await (await request("iphone")).json()) as { batch: TransferBatch | null; resumableBatches: TransferBatch[] };
+  let state = await phone();
+  assert.equal(state.batch?.id, latest.id);
+  assert.ok(state.resumableBatches.some((row) => row.id === paused.id));
+
+  assert.equal((await request(`transfers/${paused.id}/hide`, "POST")).status, 200);
+  state = await phone();
+  assert.equal(state.batch?.id, latest.id);
+  assert.ok(!state.resumableBatches.some((row) => row.id === paused.id));
+  const kept = store.get<TransferBatch>("transfer_batches", paused.id);
+  assert.equal(kept?.status, "paused");
+  assert.deepEqual(kept?.entries, paused.entries);
+  assert.ok(kept?.hiddenAt);
+
+  assert.equal((await request(`transfers/${latest.id}/hide`, "POST")).status, 200);
+  assert.equal((await phone()).batch, null);
+
+  store.remove("transfer_batches", paused.id);
+  const restored = await request("import", "POST", {
+    format: "pogo-local-backup",
+    version: 2,
+    pokemon: [],
+    observations: [],
+    settings: store.getSettings(),
+    snapshot: null,
+    transferBatches: [kept],
+  });
+  assert.equal(restored.status, 200);
+  assert.equal(store.get<TransferBatch>("transfer_batches", paused.id)?.hiddenAt, kept?.hiddenAt);
+
+  for (const status of ["approved", "running"] as const) {
+    const active: TransferBatch = { ...paused, id: `hide-${status}-batch`, status };
+    store.put("transfer_batches", active.id, active);
+    assert.equal((await request(`transfers/${active.id}/hide`, "POST")).status, 400);
+    assert.equal(store.get<TransferBatch>("transfer_batches", active.id)?.hiddenAt, undefined);
+    store.remove("transfer_batches", active.id);
+  }
+  for (const id of [paused.id, latest.id]) store.remove("transfer_batches", id);
+});
 test("總數未知時須先保存逐隻截圖，再由使用者確認開始解析", async () => {
   const stamp = new Date().toISOString();
   const scanId = "capture-checkpoint-api";

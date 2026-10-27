@@ -192,6 +192,7 @@ const transferBatchSchema = z.object({
   ),
   error: z.string().nullable(),
   approvedAt: z.string().nullable(),
+  hiddenAt: z.string().nullable().optional(),
 });
 const snapshotSchema = z.object({
   version: z.string().max(100),

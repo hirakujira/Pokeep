@@ -7,6 +7,8 @@ import { displayPokemonName } from "./format";
 import type { PhoneState } from "./types";
 import type { TransferActions } from "./use-transfer-actions";
 
+const hiddenRecordNote = "只從畫面移除，資料庫與備份仍保留這筆紀錄";
+
 export function transferProgress(batch: TransferBatch, records: Pokemon[]) {
   const resumableCount = resumableTransferIndexes(batch).length;
   const skippableIndex = skippableTransferIndex(batch);
@@ -150,6 +152,16 @@ export function BatchProgressPanel({
           停止批次
         </button>
       )}
+      {!["approved", "running"].includes(batch.status) && (
+        <button
+          className="button secondary"
+          disabled={!!busy}
+          title={hiddenRecordNote}
+          onClick={() => actions.hideBatch(batch)}
+        >
+          清除紀錄
+        </button>
+      )}
     </section>
   );
 }
@@ -191,6 +203,14 @@ export function PausedBatchesPanel({
             onClick={() => actions.resumeTransfer(row)}
           >
             繼續放生剩餘 {resumableTransferIndexes(row).length} 隻
+          </button>
+          <button
+            className="button small secondary"
+            disabled={!!busy}
+            title={hiddenRecordNote}
+            onClick={() => actions.hideBatch(row)}
+          >
+            清除紀錄
           </button>
         </div>
       ))}

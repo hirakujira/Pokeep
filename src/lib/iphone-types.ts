@@ -104,4 +104,5 @@ export type TransferBatch = {
   entries: TransferEntry[];
   error: string | null;
   approvedAt: string | null;
+  hiddenAt?: string | null;
 };

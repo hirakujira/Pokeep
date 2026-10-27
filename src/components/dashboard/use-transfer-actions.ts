@@ -47,6 +47,12 @@ export function useTransferActions(
       await api(`transfers/${batch.id}/stop`, "POST");
     });
   };
+  const hideBatch = (batch: TransferBatch) => {
+    void phoneAct("hide-transfer", async () => {
+      await api(`transfers/${batch.id}/hide`, "POST");
+      notify("已清除這筆放生紀錄；資料與備份仍會保留");
+    });
+  };
   const dismissBatch = (batch: TransferBatch) => setDismissedBatchId(batch.id);
   return {
     trackedBatchId,
@@ -55,6 +61,7 @@ export function useTransferActions(
     skipTransferEntry,
     resumeTransfer,
     stopTransfer,
+    hideBatch,
     dismissBatch,
   };
 }
