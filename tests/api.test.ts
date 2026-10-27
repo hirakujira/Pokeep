@@ -76,6 +76,32 @@ test("IPv6 本機 Host 可讀寫，格式錯誤的 Origin 視為跨網站", asyn
   assert.equal(malformed.status, 400);
   assert.equal((await malformed.json()).error, "拒絕跨網站寫入請求");
 });
+test("內部錯誤回 500 且不外洩細節，預期錯誤仍回 400", async () => {
+  const { errorResponse } = await import("../src/app/api/[...path]/_handlers/http");
+  const logged: unknown[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => void logged.push(args);
+  try {
+    for (const error of [
+      new TypeError("Cannot read properties of undefined (reading 'join')"),
+      Object.assign(new Error("ENOENT: no such file or directory, open '/Users/x/.data/a'"), { code: "ENOENT" }),
+      "boom",
+    ]) {
+      const response = errorResponse(error);
+      assert.equal(response.status, 500);
+      assert.equal((await response.json()).error, "伺服器內部錯誤，請查看服務紀錄");
+    }
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(logged.length, 3);
+  const expected = errorResponse(new Error("僅允許本機存取"));
+  assert.equal(expected.status, 400);
+  assert.equal((await expected.json()).error, "僅允許本機存取");
+  const phone = errorResponse(Object.assign(new Error("畫面已改變，請重試"), { code: "stale_observation" }));
+  assert.equal(phone.status, 400);
+  assert.equal((await phone.json()).error, "畫面已改變，請重試");
+});
 test("正式Next服務內部hostname與瀏覽器不同時，同源寫入仍可儲存", async () => {
   const req = new NextRequest("http://localhost:3000/api/iphone/prepare", {
     method: "POST",

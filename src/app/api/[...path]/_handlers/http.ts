@@ -43,16 +43,24 @@ export function guard(req: NextRequest, mutation = false) {
   )
     throw new Error("拒絕跨網站寫入請求");
 }
+// Plain Error messages are written for the user; JS runtime and Node system errors are not.
+function isInternalError(error: unknown) {
+  if (!(error instanceof Error) || error.constructor !== Error) return true;
+  const code = (error as NodeJS.ErrnoException).code;
+  return typeof code === "string" && /^(E[A-Z]+|ERR_)/.test(code);
+}
 export function errorResponse(error: unknown) {
-  const message =
-    error instanceof z.ZodError
-      ? "欄位格式不正確：" +
+  if (error instanceof z.ZodError)
+    return json({
+      error: "欄位格式不正確：" +
         error.issues
           .map((i) => `${i.path.join(".")} ${i.message}`)
           .slice(0, 5)
-          .join("；")
-      : error instanceof Error
-        ? error.message
-        : "發生未知錯誤";
-  return json({ error: message }, 400);
+          .join("；"),
+    }, 400);
+  if (isInternalError(error)) {
+    console.error(error);
+    return json({ error: "伺服器內部錯誤，請查看服務紀錄" }, 500);
+  }
+  return json({ error: (error as Error).message }, 400);
 }
