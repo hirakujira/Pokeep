@@ -13,11 +13,13 @@ import { moveName } from "../move-names";
 import { moveId, moveTraining, type CombatPick } from "./move-training";
 import { holdsSameForm, visualForm } from "./forms";
 import { reviewReason } from "./review";
+import { stepCandy } from "./evolution";
 
 export type Pick = { reason: string; peers: string[] } & CombatPick;
 export type EvolutionOption = {
   target: Species;
   candy: number;
+  candyPurified?: number;
   condition: string | null;
   /** The target is the Pokémon's own Mega Evolution or Primal Reversion. */
   mega?: boolean;
@@ -113,17 +115,17 @@ function recommendEvolution(
     a.actions.unshift(`可考慮${kind}以登錄圖鑑。`);
     return;
   }
-  const catalogCosts = evolution.map((option) =>
-    f.purified ? Math.ceil(option.candy * 0.9) : option.candy,
-  );
-  const useScreenCost = f.evolutionCandy !== null &&
-    new Set(catalogCosts).size === 1;
+  // The Game Master cost wins over the screen reading, which can mistake the
+  // candy icon for a digit (25 read as 125); the screen only fills a gap.
+  const required = (option: EvolutionOption) =>
+    (f.purified ? option.candyPurified : option.candy) ||
+    (f.evolutionCandy ?? stepCandy(option, f.purified));
   a.evolutionCandy = {
     available: f.candy,
-    options: evolution.map((option, index) => ({
+    options: evolution.map((option) => ({
       speciesId: option.target.id,
       name: option.target.name,
-      required: useScreenCost ? f.evolutionCandy! : catalogCosts[index],
+      required: required(option),
       condition: option.condition,
     })),
   };

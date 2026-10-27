@@ -248,6 +248,8 @@ export type Species = {
   evolutions: {
     id: string;
     candy: number;
+    /** Candy a purified Pokémon pays; missing when the Game Master lists none. */
+    candyPurified?: number;
     condition: string | null;
     gender?: string;
   }[];

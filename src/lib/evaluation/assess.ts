@@ -100,8 +100,7 @@ function leagueResults(
     if (!r.level) continue;
     const cost =
       current === null ? null : powerCost(current, r.level, f, snapshot);
-    if (cost)
-      cost.candy += f.purified ? Math.ceil(path.candy * 0.9) : path.candy;
+    if (cost) cost.candy += path.candy;
     leagues.push({
       league: cap,
       speciesId: target.id,
@@ -146,8 +145,7 @@ function raidResults(
       .map((level) => {
         const cost =
           current === null ? null : powerCost(current, level, f, snapshot);
-        if (cost)
-          cost.candy += f.purified ? Math.ceil(path.candy * 0.9) : path.candy;
+        if (cost) cost.candy += path.candy;
         return {
           level,
           cp: combatPower(target, values, level, snapshot),

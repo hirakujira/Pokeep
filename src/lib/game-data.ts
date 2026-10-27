@@ -315,6 +315,7 @@ export function normalizeData(
       return {
         id,
         candy: branch?.candyCost ?? g?.candyToEvolve ?? 0,
+        candyPurified: branch?.candyCostPurified,
         condition: conditions.length ? conditions.join("；") : null,
         gender: branch?.genderRequirement?.includes("FEMALE")
           ? "female"

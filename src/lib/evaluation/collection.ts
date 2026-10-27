@@ -174,7 +174,9 @@ function groupEvolutionCandidates(living: Pokemon[], snapshot: Snapshot | null) 
     ) || [];
     const options = evolutions.flatMap((evolution) => {
       const target = snapshot.species[evolution.id];
-      return target ? [{ target, candy: evolution.candy, condition: evolution.condition }] : [];
+      return target ? [{
+        target, candy: evolution.candy, candyPurified: evolution.candyPurified, condition: evolution.condition,
+      }] : [];
     });
     if (!options.length || options.length !== evolutions.length) {
       needsReview.add(p.id);

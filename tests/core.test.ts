@@ -576,10 +576,10 @@ test("外觀形態（花色、海域）各算一個形態收藏代表，進化�
   assert.match(undecided.analysis?.reasons[0] || "", /進化剪影尚未判定/);
 });
 
-test("可進化個體比較持有糖果與畫面成本，分支成本不同時分開列出", () => {
+test("可進化個體比較持有糖果與進化成本，遊戲資料優先於畫面讀值，分支成本不同時分開列出", () => {
   const snapshot = fixture();
   snapshot.species.caterpie.evolutions = [
-    { id: "metapod", candy: 12, condition: null },
+    { id: "metapod", candy: 12, candyPurified: 10, condition: null },
   ];
   snapshot.species.metapod = species("metapod");
   const assessCandy = (id: string, candy: number | null, evolutionCandy: number | null,
@@ -587,14 +587,27 @@ test("可進化個體比較持有糖果與畫面成本，分支成本不同時�
       record(id, { candy, evolutionCandy, purified, favorite: false },
         { evolutionSilhouette: true }),
     ], snapshot, settings)[0].analysis;
-  assert.deepEqual(assessCandy("short", 48, 50)?.evolutionCandy, {
-    available: 48,
-    options: [{ speciesId: "metapod", name: "metapod", required: 50, condition: null }],
+  const required = (...args: Parameters<typeof assessCandy>) =>
+    assessCandy(...args)?.evolutionCandy?.options[0].required;
+  // The screen read the candy icon as a leading 1; the Game Master cost still wins.
+  assert.deepEqual(assessCandy("short", 8, 112)?.evolutionCandy, {
+    available: 8,
+    options: [{ speciesId: "metapod", name: "metapod", required: 12, condition: null }],
   });
   assert.equal(assessCandy("enough", 60, 50)?.evolutionCandy?.available, 60);
   assert.equal(assessCandy("unknown", null, 50)?.evolutionCandy?.available, null);
-  assert.equal(assessCandy("purified", 11, null, true)?.evolutionCandy?.options[0].required, 11);
-  snapshot.species.caterpie.evolutions.push({ id: "butterfree", candy: 50, condition: "道具" });
+  assert.equal(required("purified", 11, 11, true), 10);
+  const purified = record("x", { purified: true }).fields;
+  assert.equal(evolutionPaths(snapshot.species.caterpie, purified, snapshot)[1].candy, 10);
+  snapshot.species.caterpie.evolutions = [{ id: "metapod", candy: 12, condition: null }];
+  assert.equal(required("purified-screen", 11, 10, true), 10);
+  assert.equal(required("purified-estimate", 11, null, true), 11);
+  snapshot.species.caterpie.evolutions = [{ id: "metapod", candy: 0, condition: null }];
+  assert.equal(required("no-game-data", 30, 12), 12);
+  snapshot.species.caterpie.evolutions = [
+    { id: "metapod", candy: 12, condition: null },
+    { id: "butterfree", candy: 50, condition: "道具" },
+  ];
   snapshot.species.butterfree = species("butterfree");
   const branches = assessCandy("branches", 30, 12)?.evolutionCandy?.options;
   assert.deepEqual(branches?.map((option) => option.required), [12, 50]);
@@ -1434,7 +1447,7 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID", async ()
     ]),
     branches(361, "SNORUNT", [
       { evolution: "FROSLASS", candyCost: 100, genderRequirement: "FEMALE" },
-      { evolution: "GLALIE", candyCost: 100 },
+      { evolution: "GLALIE", candyCost: 100, candyCostPurified: 90 },
     ]),
   ];
   const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
@@ -1445,6 +1458,7 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID", async ()
   // Pyroar has no separate female ID, so both genders evolve into the same species.
   assert.deepEqual(evolutions("litleo"), [["pyroar", "male"], ["pyroar", "female"]]);
   assert.deepEqual(evolutions("snorunt"), [["froslass", "female"], ["glalie", undefined]]);
+  assert.deepEqual(result.snorunt.evolutions.map((e) => e.candyPurified), [undefined, 90]);
 });
 
 test("遊戲資料標記可 Mega 進化或原始回歸的物種", async () => {

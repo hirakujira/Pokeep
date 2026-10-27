@@ -221,6 +221,7 @@ const snapshotSchema = z.object({
         z.object({
           id: z.string(),
           candy: z.number().nonnegative(),
+          candyPurified: z.number().nonnegative().optional(),
           condition: z.string().nullable(),
           gender: z.string().optional(),
         }),

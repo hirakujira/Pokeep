@@ -1,6 +1,13 @@
 import type { Fields, Snapshot, Species } from "../types";
 
 export type EvolutionPath = { s: Species; candy: number; condition: string | null };
+/** Candy one evolution costs; a purified Pokémon pays the Game Master's purified price, or about 10% less when none is listed. */
+export function stepCandy(
+  e: Pick<Species["evolutions"][number], "candy" | "candyPurified">,
+  purified: boolean | null,
+) {
+  return purified ? e.candyPurified ?? Math.ceil(e.candy * 0.9) : e.candy;
+}
 export function evolutionPaths(
   s: Species,
   f: Fields,
@@ -18,7 +25,7 @@ export function evolutionPaths(
       if (e.gender && f.gender && e.gender !== f.gender) continue;
       const next = snapshot.species[e.id];
       if (next)
-        walk(next, candy + e.candy, [
+        walk(next, candy + stepCandy(e, f.purified), [
           ...conditions,
           ...(e.condition ? [e.condition] : []),
         ]);
