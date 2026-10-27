@@ -519,6 +519,30 @@ test("未登錄進化剪影與已匯入收藏缺少下一階即列為可進化",
   assert.match(transferExclusion(staleTransfer, snapshot) || "", /未登錄進化剪影/);
 });
 
+test("最終進化型的超級進化或原始回歸剪影推薦同類最佳一隻，其餘照常評估", () => {
+  const snapshot = fixture();
+  snapshot.species.caterpie.mega = true;
+  // Equal individuals rank by ID, so mega-a is the one to Mega Evolve.
+  const first = record("mega-a", { favorite: false }, { evolutionSilhouette: true });
+  const second = record("mega-b", { favorite: false }, { evolutionSilhouette: true });
+  const [winner, peer] = evaluateCollection(
+    [second, first], snapshot, settings, new Set([first.id, second.id]),
+  ).sort((a, b) => a.id.localeCompare(b.id));
+  assert.equal(winner.analysis?.category, "evolve");
+  assert.equal(winner.analysis?.reasons[0], "超級進化按鈕顯示未登錄剪影；同類中優先超級進化這隻");
+  assert.equal(winner.analysis?.actions[0], "可考慮超級進化以登錄圖鑑。");
+  assert.equal(winner.analysis?.evolutionCandy, null);
+  assert.equal(peer.analysis?.category, "transfer");
+  assert.ok(peer.analysis?.reasons.includes("同類已有更適合進化的個體"));
+  assert.equal(transferExclusion(peer, snapshot), null);
+  const shadow = record("mega-shadow", { favorite: false, shadow: true }, { evolutionSilhouette: true });
+  assert.equal(evaluateCollection([shadow], snapshot, settings)[0].analysis?.category, "review");
+  snapshot.species.kyogre = species("kyogre", { mega: true });
+  const kyogre = record("primal", { speciesId: "kyogre", favorite: false }, { evolutionSilhouette: true });
+  assert.equal(evaluateCollection([kyogre], snapshot, settings)[0].analysis?.reasons[0],
+    "原始回歸按鈕顯示未登錄剪影；同類中優先原始回歸這隻");
+});
+
 test("可進化個體比較持有糖果與畫面成本，分支成本不同時分開列出", () => {
   const snapshot = fixture();
   snapshot.species.caterpie.evolutions = [

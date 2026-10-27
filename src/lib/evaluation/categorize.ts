@@ -13,7 +13,13 @@ import { moveId, moveTraining, type CombatPick } from "./move-training";
 import { reviewReason } from "./review";
 
 export type Pick = { reason: string; peers: string[] } & CombatPick;
-export type EvolutionOption = { target: Species; candy: number; condition: string | null };
+export type EvolutionOption = {
+  target: Species;
+  candy: number;
+  condition: string | null;
+  /** The target is the Pokémon's own Mega Evolution or Primal Reversion. */
+  mega?: boolean;
+};
 export type EvolutionChoice = {
   winners: Map<string, EvolutionOption[]>;
   peers: Map<string, string>;
@@ -98,6 +104,13 @@ function recommendEvolution(
   completeBoxIds?: Set<string>,
 ) {
   a.category = "evolve";
+  if (evolution[0].mega) {
+    // Kyogre and Groudon are the only Pokémon with Primal Reversion.
+    const kind = /^(kyogre|groudon)$/.test(evolution[0].target.id) ? "原始回歸" : "超級進化";
+    a.reasons.unshift(`${kind}按鈕顯示未登錄剪影；同類中優先${kind}這隻`);
+    a.actions.unshift(`可考慮${kind}以登錄圖鑑。`);
+    return;
+  }
   const catalogCosts = evolution.map((option) =>
     f.purified ? Math.ceil(option.candy * 0.9) : option.candy,
   );

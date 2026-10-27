@@ -155,7 +155,18 @@ function groupEvolutionCandidates(living: Pokemon[], snapshot: Snapshot | null) 
       ) ||
       p.evolutionSilhouette !== true || f.costume !== null
     ) continue;
-    const evolutions = snapshot.species[f.speciesId]?.evolutions.filter(
+    const species = snapshot.species[f.speciesId];
+    // A final form's evolve button is its Mega Evolution or Primal Reversion,
+    // which a shadow cannot take. The silhouette alone shows it is unregistered.
+    if (species?.mega && !species.evolutions.length && f.shadow === false) {
+      const key = `${f.speciesId}/mega`;
+      groups.set(key, [
+        ...(groups.get(key) || []),
+        { p, options: [{ target: species, candy: 0, condition: null, mega: true }] },
+      ]);
+      continue;
+    }
+    const evolutions = species?.evolutions.filter(
       (evolution) => !evolution.gender || evolution.gender === f.gender,
     ) || [];
     const options = evolutions.flatMap((evolution) => {
