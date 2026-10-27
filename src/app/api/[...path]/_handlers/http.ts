@@ -28,16 +28,18 @@ export async function body(req: NextRequest, max = 2 * 1024 * 1024) {
   }
 }
 export function guard(req: NextRequest, mutation = false) {
-  const hostHeader = req.headers.get("host"),
-    host = hostHeader?.split(":")[0];
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(host || ""))
+  const hostHeader = req.headers.get("host") || "",
+    host = hostHeader.startsWith("[")
+      ? hostHeader.slice(0, hostHeader.indexOf("]") + 1)
+      : hostHeader.split(":")[0];
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(host))
     throw new Error("僅允許本機存取");
   const origin = req.headers.get("origin");
   // Next's production request.url can use its internal hostname; compare the browser origin to the validated Host instead.
   if (
     mutation &&
     (req.headers.get("x-pogo-local") !== "1" ||
-      (origin && new URL(origin).host !== hostHeader))
+      (origin && (!URL.canParse(origin) || new URL(origin).host !== hostHeader)))
   )
     throw new Error("拒絕跨網站寫入請求");
 }

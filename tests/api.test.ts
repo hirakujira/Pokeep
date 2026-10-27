@@ -58,6 +58,24 @@ test("拒絕跨網站寫入及非本機Host", async () => {
     400,
   );
 });
+test("IPv6 本機 Host 可讀寫，格式錯誤的 Origin 視為跨網站", async () => {
+  assert.equal(
+    (await request("state", "GET", undefined, { host: "[::1]:3000" })).status,
+    200,
+  );
+  assert.equal(
+    (
+      await request("iphone/prepare", "POST", {}, {
+        host: "[::1]:3000",
+        origin: "http://[::1]:3000",
+      })
+    ).status,
+    200,
+  );
+  const malformed = await request("iphone/prepare", "POST", {}, { origin: "not a url" });
+  assert.equal(malformed.status, 400);
+  assert.equal((await malformed.json()).error, "拒絕跨網站寫入請求");
+});
 test("正式Next服務內部hostname與瀏覽器不同時，同源寫入仍可儲存", async () => {
   const req = new NextRequest("http://localhost:3000/api/iphone/prepare", {
     method: "POST",
