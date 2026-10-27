@@ -11,7 +11,6 @@ import {
 import { evaluateCollection } from "./evaluation/collection";
 import type { Scan, ScanItem } from "./iphone-types";
 
-export { collectionCostume } from "./evaluation/assess";
 export { verificationEvidenceGaps } from "./evaluation/review";
 export {
   multiplier,

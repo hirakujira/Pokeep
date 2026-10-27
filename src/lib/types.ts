@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { MaxStatus } from "./max-status";
+import { speciesCostume } from "./species-names";
 
 const numberOrNull = z.number().finite().nonnegative().nullable();
 const textOrNull = z.string().max(160).nullable();
@@ -314,10 +315,11 @@ export const categoryLabels = {
   evolve: "可進化",
   review: "待確認",
 };
-export const effective = (p: Pokemon): Fields => ({
-  ...p.fields,
-  ...p.overrides,
-});
+export const effective = (p: Pokemon): Fields => {
+  const f = { ...p.fields, ...p.overrides };
+  // A costume-only species ID already says which costume the Pokémon wears.
+  return f.costume === null ? { ...f, costume: speciesCostume(f.speciesId) } : f;
+};
 /**
  * The Max status, or none when it cannot be anything else: the species has no
  * Max form, or the Pokémon is shadow or purified, which Max Battles never give.

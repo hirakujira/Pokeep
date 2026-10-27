@@ -1,4 +1,4 @@
-import { localizeForm, normalFormTexts } from "@/lib/species-names";
+import { localizeForm, normalFormTexts, speciesCostume } from "@/lib/species-names";
 import type { Fields, Gender, VisualForm } from "@/lib/types";
 import type { Catalog } from "./types";
 
@@ -25,6 +25,8 @@ const normalTexts = new Set(normalFormTexts);
 
 function catalogFormLabel(s: CatalogSpecies) {
   if (unknownFormBases.has(s.id)) return unknownForm;
+  const costume = speciesCostume(s.id);
+  if (costume) return `服裝：${costume}`;
   if (!s.form) return normalForm;
   if (!s.form.startsWith("(")) return s.form;
   return [...s.form.matchAll(/\(([^()]+)\)/g)]

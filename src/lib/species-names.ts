@@ -79,6 +79,24 @@ const formNames: Record<string, string> = {
   Stretchy: "平挺姿勢",
 };
 
+// PvPoke gives these costumed Pikachu their own IDs only to track their move
+// pools; in GO they are costumes with the ordinary Pikachu's stats.
+const costumeSpecies: Record<string, string> = {
+  pikachu_5th_anniversary: "5th Anniversary",
+  pikachu_flying: "Flying",
+  pikachu_horizons: "Horizons",
+  pikachu_kariyushi: "Kariyushi",
+  pikachu_libre: "Libre",
+  pikachu_pop_star: "Pop Star",
+  pikachu_rock_star: "Rock Star",
+  pikachu_shaymin: "Shaymin Scarf",
+};
+/** The costume a costume-only species ID stands for; null for every other ID. */
+export function speciesCostume(speciesId: string | null | undefined) {
+  const form = speciesId ? costumeSpecies[speciesId.replace(/_shadow$/, "")] : undefined;
+  return form ? formNames[form] : null;
+}
+
 /** Scanned form texts that name the ordinary form ("普通" comes from OCR of the summary page). */
 export const normalFormTexts = ["一般", "普通", "normal"];
 

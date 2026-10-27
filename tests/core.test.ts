@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { fixture, record, species, settings } from "./fixtures";
-import { emptyFields, settingsSchema, type Observation, type Pokemon } from "../src/lib/types";
+import { effective, emptyFields, settingsSchema, type Observation, type Pokemon } from "../src/lib/types";
+import { canonicalCostume, costumeVocabulary, knownCostumes } from "../src/lib/costumes";
 import type { ScanItem } from "../src/lib/iphone-types";
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pogo-test-"));
@@ -20,7 +21,6 @@ const {
   evaluateCollection,
   verificationEvidenceGaps,
   reconcileReviewedEvidence,
-  collectionCostume,
   cycleDps,
 } = await import("../src/lib/evaluate");
 const { matching, integrateObservations } = await import("../src/lib/matching");
@@ -100,18 +100,41 @@ test("人工核對後只清理已解決的物種缺口，並補回無性別資�
   assert.equal(reconcileReviewedEvidence({ ...reviewed, overrides: { gender: null } }, snapshot).fields.gender, null);
 });
 
-test("同款小火龍護目鏡歸為同一收藏槽，其他服裝仍分開", () => {
-  assert.equal(collectionCostume("charmander", "泳鏡"), "胸前護目鏡");
-  assert.equal(collectionCostume("charmander", "胸前佩戴皮卡丘造型遮陽帽"), "胸前護目鏡");
-  assert.equal(collectionCostume("piplup", "南瓜帽"), "南瓜帽");
+test("服裝名稱沿用收藏中已用過的名稱，人工修正前的原文成為別名", () => {
+  const corrected = record("corrected", { speciesId: "charmander", costume: "泳鏡" },
+    { overrides: { costume: "胸前護目鏡" } });
+  const known = knownCostumes([
+    corrected,
+    record("plain", { speciesId: "charmander", costume: "胸前護目鏡" }),
+    record("shadow", { speciesId: "charmander_shadow", costume: "派對帽" }),
+    record("stale", { speciesId: "charmander", costume: "泳鏡" }),
+    record("piplup", { speciesId: "piplup", costume: "南瓜帽" }),
+  ]).get("charmander");
+  assert.deepEqual(known?.names, ["胸前護目鏡", "派對帽"]);
+  assert.equal(canonicalCostume(known, "泳 鏡"), "胸前護目鏡");
+  assert.equal(canonicalCostume(known, "派對帽"), "派對帽");
+  assert.equal(canonicalCostume(known, "南瓜帽"), "南瓜帽");
+  assert.equal(canonicalCostume(undefined, "泳鏡"), "泳鏡");
   const snapshot = fixture();
-  snapshot.species.charmander = species("charmander");
+  snapshot.species.charmander = species("charmander", { name: "小火龍" });
+  assert.deepEqual(costumeVocabulary(new Map([["charmander", known!], ["missing", known!]]), snapshot),
+    ["小火龍：胸前護目鏡、派對帽"]);
   const evaluated = evaluateCollection([
-    record("first", { speciesId: "charmander", costume: "泳鏡" }),
-    record("second", { speciesId: "charmander", form: "一般", costume: "胸前佩戴皮卡丘造型遮陽帽" }),
+    corrected,
+    record("second", { speciesId: "charmander", form: "一般", costume: "胸前護目鏡" }),
   ], snapshot, { ...settings, rareRepresentatives: 1 });
   assert.equal(evaluated.filter((p) => p.analysis?.reasons.includes("服裝「胸前護目鏡」收藏代表（同組前 1 名）")).length, 1);
   assert.deepEqual(evaluated.map((p) => p.analysis?.category), ["collect", "collect"]);
+});
+
+test("服裝皮卡丘的獨立 ID 算服裝收藏，不算形態", () => {
+  const snapshot = fixture();
+  snapshot.species.pikachu_pop_star = species("pikachu_pop_star", { form: "(Pop Star)" });
+  const [popStar] = evaluateCollection([record("pop", { speciesId: "pikachu_pop_star" })], snapshot, settings);
+  assert.equal(effective(popStar).costume, "流行偶像");
+  assert.deepEqual(popStar.analysis?.collectionKeys.map((key) => key.label), ["服裝「流行偶像」"]);
+  assert.equal(effective(record("named", { speciesId: "pikachu_pop_star", costume: "舞台裝" })).costume, "舞台裝");
+  assert.equal(effective(record("plain", { speciesId: "pikachu" })).costume, null);
 });
 
 test("單張畫面的暗影與淨化判斷須有招式或第二畫面佐證", () => {

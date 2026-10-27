@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { effective, fieldLabels, type Fields, type Pokemon } from "@/lib/types";
 import { localizeMoveText, moveName } from "@/lib/move-names";
-import { localizeSpeciesName } from "@/lib/species-names";
+import { localizeSpeciesName, speciesCostume } from "@/lib/species-names";
+import { costumeSpeciesKey, knownCostumes } from "@/lib/costumes";
 import { DrawerAnalysis } from "./drawer-analysis";
 import {
   displayPokemonName,
@@ -148,7 +149,8 @@ export function PokemonDrawer({
     activeSource = p.sources[Math.min(source, p.sources.length - 1)],
     moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
   const entries = useMemo(() => dexEntries(catalog.species, catalog.visualForms), [catalog]),
-    speciesById = useMemo(() => new Map(catalog.species.map((s) => [s.id, s])), [catalog]);
+    speciesById = useMemo(() => new Map(catalog.species.map((s) => [s.id, s])), [catalog]),
+    costumeNames = useMemo(() => knownCostumes(records), [records]);
   const reviewPrompts = reviewPromptsFor(p);
   const shown = withFixedValues(fields, speciesById);
   // A final evolution shows as such without storing anything; a stored
@@ -191,11 +193,12 @@ export function PokemonDrawer({
       : entries.find((e) => e.dex === dex);
   })();
   const applyForm = (option: FormOption) => {
-    setFields((f) => ({
-      ...f,
-      speciesId: option.speciesId && speciesWithShadow(option.speciesId, f.shadow, speciesById),
-      form: option.form,
-    }));
+    setFields((f) => {
+      const speciesId = option.speciesId && speciesWithShadow(option.speciesId, f.shadow, speciesById);
+      // A costume that only came from the old costume-only ID does not carry over.
+      const costume = f.costume === speciesCostume(f.speciesId) ? speciesCostume(speciesId) : f.costume;
+      return { ...f, speciesId, form: option.form, costume };
+    });
     setVerified(false);
   };
   const chooseDex = (dex: number | null) => {
@@ -334,6 +337,7 @@ export function PokemonDrawer({
         ) : (
           <input
             type={text ? "text" : "number"}
+            list={key === "costume" ? "costume-options" : undefined}
             step={["height", "weight"].includes(key) ? "0.01" : "1"}
             min={0}
             max={key.startsWith("iv") ? 15 : undefined}
@@ -610,6 +614,10 @@ export function PokemonDrawer({
                       ).map(editor)}
                     </div>
                   </details>
+                  <datalist id="costume-options">
+                    {(fields.speciesId ? costumeNames.get(costumeSpeciesKey(fields.speciesId))?.names ?? [] : [])
+                      .map((name) => <option key={name} value={name} />)}
+                  </datalist>
                   <datalist id="move-options">
                     {catalog.moves.map((m) => (
                       <option key={m.id} value={m.name}>

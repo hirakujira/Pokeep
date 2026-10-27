@@ -211,6 +211,8 @@ const formCatalog = {
   species: catalogSpecies([
     ["pidgey", 16, "波波", null],
     ["rattata", 19, "小拉達", null],
+    ["pikachu", 25, "皮卡丘", null],
+    ["pikachu_pop_star", 25, "皮卡丘 (Pop Star)", "(Pop Star)"],
     ["rattata_shadow", 19, "小拉達（暗影）", null],
     ["rattata_alolan", 19, "小拉達 (Alolan)", "(Alolan)"],
     ["rattata_alolan_shadow", 19, "小拉達 (Alolan)（暗影）", "(Alolan)"],
@@ -236,11 +238,12 @@ test("物種選單每個圖鑑編號一項，形態另列且無法判斷時為�
   const byDex = Object.fromEntries(entries.map((e) => [e.dex, e]));
   const labels = (dex: number) => byDex[dex].options.map((o) => o.label);
   assert.deepEqual(entries.map((e) => `${e.dex} ${e.name}`),
-    ["16 波波", "19 小拉達", "32 尼多朗", "422 無殼海兔", "487 騎拉帝納", "648 美洛耶塔", "744 岩狗狗", "931 怒鸚哥"]);
+    ["16 波波", "19 小拉達", "25 皮卡丘", "32 尼多朗", "422 無殼海兔", "487 騎拉帝納", "648 美洛耶塔", "744 岩狗狗", "931 怒鸚哥"]);
   assert.deepEqual(labels(16), ["一般"]);
   assert.deepEqual(labels(32), ["一般"]);
   assert.deepEqual(labels(648), ["一般"]);
   assert.deepEqual(labels(19), ["一般", "阿羅拉的樣子"]);
+  assert.deepEqual(labels(25), ["一般", "服裝：流行偶像"]);
   assert.deepEqual(labels(487), ["待確認", "別種形態", "起源形態"]);
   assert.deepEqual(labels(422), ["待確認", "西海", "東海"]);
   assert.deepEqual(labels(744), ["待確認", "一般", "黃昏的樣子"]);
@@ -290,6 +293,25 @@ test("詳細資料面板以圖鑑編號與形態兩個選單顯示目前物種",
   assert.match(html, /<option value="east_sea" selected="">東海<\/option>/);
   assert.match(html, /<option value="">待確認<\/option>/);
   assert.doesNotMatch(html, /暗影）<\/option>/);
+});
+
+test("詳細資料面板的服裝欄位提供同物種已用過的服裝名稱", () => {
+  const html = renderToString(React.createElement(PokemonDrawer, {
+    pokemon: record("hat", { name: "皮卡丘", speciesId: "pikachu", costume: null }),
+    records: [
+      record("a", { speciesId: "pikachu", costume: "泳鏡" }, { overrides: { costume: "聖誕帽" } }),
+      record("b", { speciesId: "pikachu", costume: "花冠" }),
+      record("c", { speciesId: "pidgey", costume: "派對帽" }),
+    ],
+    catalog: formCatalog,
+    error: "",
+    onClose: () => {},
+    onSave: async () => null,
+    onMerge: async () => {},
+    busy: false,
+  }));
+  assert.match(html, /<input type="text" list="costume-options"/);
+  assert.match(html, /<datalist id="costume-options"><option value="聖誕帽"><\/option><option value="花冠"><\/option><\/datalist>/);
 });
 
 test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單；不可能的進化與淨化成本停用", () => {
