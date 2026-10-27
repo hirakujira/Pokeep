@@ -280,11 +280,10 @@ function addCombatActions(
     }
   }
 }
-// Shadow Pokémon pay 1.2× and purified Pokémon 0.8× the regular cost. Smeargle
-// lists no stardust and an unreachable candy cost.
+// Shadow Pokémon pay 1.2× and purified Pokémon 0.8× the regular cost.
 function secondMoveCost(f: Fields, snapshot: Snapshot | null) {
   const cost = f.speciesId ? snapshot?.species[f.speciesId]?.thirdMove : null;
-  if (!cost?.dust) return null;
+  if (!cost) return null;
   const rate = f.shadow ? 1.2 : f.purified ? 0.8 : 1;
   return { dust: Math.round(cost.dust * rate), candy: Math.round(cost.candy * rate) };
 }

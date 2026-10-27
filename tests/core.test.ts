@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { fixture, record, species, settings } from "./fixtures";
-import { effective, emptyFields, settingsSchema, type Fields, type Observation, type Pokemon } from "../src/lib/types";
+import { effective, emptyFields, settingsSchema, validFrame, type Fields, type Observation, type Pokemon } from "../src/lib/types";
 import { canonicalCostume, costumeVocabulary, knownCostumes } from "../src/lib/costumes";
 import type { ScanItem } from "../src/lib/iphone-types";
 
@@ -33,8 +33,7 @@ const { localizeSpeciesName } = await import("../src/lib/species-names");
 const { typeName } = await import("../src/lib/type-names");
 const { transferExclusion, requireSpecialCorroboration } = await import("../src/lib/iphone-safety");
 const store = await import("../src/lib/store");
-const { exportBackup, importBackup, exportCsv, validFrame } =
-  await import("../src/lib/backup");
+const { exportBackup, importBackup, exportCsv } = await import("../src/lib/backup");
 after(() => {
   store.db().close();
   fs.rmSync(temp, { recursive: true, force: true });
@@ -1040,8 +1039,8 @@ test("開招成本取遊戲資料：暗影 1.2 倍、淨化 0.8 倍，不用畫�
   assert.equal(unlock("regular"), "PvP 通常需第二特殊招式；開招需 10,000 星塵及 25 糖果。");
   assert.match(unlock("shadow", { speciesId: "caterpie_shadow", shadow: true }) ?? "", /開招需 12,000 星塵及 30 糖果/);
   assert.match(unlock("purified", { purified: true }) ?? "", /開招需 8,000 星塵及 20 糖果/);
-  s.species.caterpie.thirdMove = { candy: 9999999 } as never;
-  assert.match(unlock("no-stardust") ?? "", /請核對遊戲中的開招成本/);
+  s.species.caterpie.thirdMove = null;
+  assert.match(unlock("no-unlock") ?? "", /請核對遊戲中的開招成本/);
 });
 test("未核對的高IV候選不會擠掉已核對個體的PvP名額", () => {
   const s = fixture();
@@ -1316,14 +1315,23 @@ test("AI 等候重試時可以取消，不繼續產生請求", async () => {
     store.remove("settings", "runtime-config");
   }
 });
-test("完整備份可還原且重複匯入不覆蓋人工修正", async () => {
-  store.saveSnapshot(fixture());
+test("完整備份可還原個體與遊戲資料快照（含 Mega、極巨化、淨化與外觀形態），重複匯入不覆蓋人工修正", async () => {
+  const snapshot = fixture();
+  snapshot.species.caterpie = species("caterpie", {
+    mega: true,
+    maxForms: ["dynamax", "gigantamax"],
+    purification: { dust: 3000, candy: 3 },
+  });
+  snapshot.visualForms = { "10": [{ id: "caterpie_party_hat", label: "派對帽" }] };
+  store.saveSnapshot(snapshot);
   const p = record("backup", {}, { maxStatus: "dynamax" });
   store.put("pokemon", p.id, p);
   const backup = await exportBackup();
   store.remove("pokemon", p.id);
+  store.remove("settings", "snapshot");
   assert.equal((await importBackup(backup)).imported, 1);
   assert.equal(store.get<PokemonType>("pokemon", p.id)?.maxStatus, "dynamax");
+  assert.deepEqual(store.getSnapshot(), snapshot);
   store.put("pokemon", p.id, {
     ...store.get("pokemon", p.id)!,
     overrides: { name: "已修改" },
@@ -1565,7 +1573,7 @@ test("PvPoke 招式代號對應到 Game Master 的招式數值", async () => {
     for (const id of [...s.fast, ...s.charged, ...s.elite]) assert.ok(moves[id], id);
 });
 
-test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取淨化個體的進化成本與淨化成本", async () => {
+test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取淨化個體的進化成本、淨化成本與開第二招成本", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, evolutions?: string[]) => ({
     speciesId: id, speciesName: id, dex, released: true,
@@ -1578,6 +1586,7 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取�
     base("espurr", 677, ["meowstic", "meowstic"]), base("meowstic", 678), base("meowstic_female", 678),
     base("litleo", 667, ["pyroar", "pyroar"]), base("pyroar", 668),
     base("snorunt", 361, ["froslass", "glalie"]), base("froslass", 478), base("glalie", 362),
+    base("smeargle", 235),
   ];
   const branches = (dex: number, name: string, evolutionBranch: Record<string, unknown>[], extra = {}) => ({
     templateId: `V${String(dex).padStart(4, "0")}_POKEMON_${name}`,
@@ -1601,7 +1610,12 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取�
     branches(361, "SNORUNT", [
       { evolution: "FROSLASS", candyCost: 100, genderRequirement: "FEMALE" },
       { evolution: "GLALIE", candyCost: 100, candyCostPurified: 90 },
-    ], { shadow: { purificationStardustNeeded: 3000, purificationCandyNeeded: 3 } }),
+    ], {
+      shadow: { purificationStardustNeeded: 3000, purificationCandyNeeded: 3 },
+      thirdMove: { stardustToUnlock: 10000, candyToUnlock: 25 },
+    }),
+    // Smeargle cannot unlock a second move; the Game Master lists only an unreachable candy cost.
+    branches(235, "SMEARGLE", [], { thirdMove: { candyToUnlock: 9999999 } }),
   ];
   const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
     [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
@@ -1614,6 +1628,8 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取�
   assert.deepEqual(result.snorunt.evolutions.map((e) => e.candyPurified), [undefined, 90]);
   assert.deepEqual(result.snorunt.purification, { dust: 3000, candy: 3 });
   assert.equal(result.espurr.purification, undefined);
+  assert.deepEqual(result.snorunt.thirdMove, { dust: 10000, candy: 25 });
+  assert.equal(result.smeargle.thirdMove, null);
 });
 
 test("PvPoke 拼錯的鬃岩狼人（黃昏）對應到遊戲資料中我行我素岩狗狗的進化", async () => {

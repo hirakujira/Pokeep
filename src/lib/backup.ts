@@ -14,261 +14,27 @@ import {
   transaction,
 } from "./store";
 import {
-  fieldsSchema,
+  observationSchema,
+  pokemonSchema,
   settingsSchema,
+  snapshotSchema,
+  validFrame,
   type Observation,
-  type Pokemon,
-  type Snapshot,
 } from "./types";
-import type { Scan, ScanItem, TransferBatch } from "./iphone-types";
+import {
+  scanItemSchema,
+  scanSchema,
+  transferBatchSchema,
+  type Scan,
+  type ScanItem,
+  type TransferBatch,
+} from "./iphone-types";
 import { reevaluate } from "./evaluate";
-import { maxTransferSearchFilters } from "./transfer-search-filters";
 
-export const validFrame = (frame: string) =>
-  /^[a-zA-Z0-9-]{1,80}\/[a-zA-Z0-9_-]{1,140}\.jpg$/.test(frame);
-const evidence = z.object({
-  observationId: z.string().max(100),
-  frame: z.string().refine(validFrame),
-  time: z.number().min(0).max(600),
-  video: z.string().max(200),
-  fields: z.array(
-    z.enum(
-      Object.keys(fieldsSchema.shape) as [
-        keyof typeof fieldsSchema.shape,
-        ...(keyof typeof fieldsSchema.shape)[],
-      ],
-    ),
-  ),
-  source: z.enum(["video", "iphone"]).optional(),
-  capturedAt: z.string().datetime().optional(),
-  scanItemId: z.string().max(100).optional(),
-});
-export const pokemonBackupSchema = z.object({
-  id: z.string().min(1).max(100),
-  jobId: z.string().max(100),
-  fields: fieldsSchema,
-  overrides: fieldsSchema.partial(),
-  sources: z.array(evidence).max(10000),
-  issues: z.array(z.string().max(500)).max(1000),
-  candidates: z.array(z.string().max(100)).max(1000),
-  verified: z.boolean(),
-  verification: z.enum(["human", "automatic"]).nullable().optional(),
-  evolutionSilhouette: z.union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")]).nullable().optional(),
-  maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
-  locked: z.boolean(),
-  owned: z.boolean(),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  analysis: z.unknown().optional(),
-});
-const observationSchema = z.object({
-  id: z.string().max(100),
-  jobId: z.string().max(100),
-  segment: z.string().max(100),
-  frame: z.string().refine(validFrame),
-  time: z.number().min(0).max(600),
-  video: z.string().max(200),
-  fields: fieldsSchema,
-  issues: z.array(z.string().max(500)),
-  ivMeasured: z.array(z.number().int().min(0).max(15)).length(3).nullable(),
-  kind: z.string().max(50),
-  source: z.enum(["video", "iphone"]).optional(),
-  capturedAt: z.string().datetime().optional(),
-  scanItemId: z.string().max(100).optional(),
-});
-const scanSchema = z.object({
-  id: z.string().max(100),
-  scope: z.enum(["results", "all"]),
-  status: z.enum([
-    "queued",
-    "running",
-    "paused",
-    "completed",
-    "stopped",
-    "failed",
-  ]),
-  stage: z.string().max(500),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  completedAt: z.string().datetime().optional(),
-  scanned: z.number().int().nonnegative(),
-  phase: z.enum(["capture", "analysis"]).optional(),
-  analyzed: z.number().int().nonnegative().optional(),
-  review: z.number().int().nonnegative(),
-  expected: z.number().int().nonnegative().nullable(),
-  sort: z.string().nullable(),
-  currentFrame: z.string().nullable(),
-  lastFingerprint: z.string().nullable(),
-  apiUsage: z.object({
-    input: z.number(),
-    output: z.number(),
-    requests: z.number(),
-    cached: z.number(),
-    navigationRequests: z.number().optional(),
-    dataRequests: z.number().optional(),
-  }),
-  error: z.string().nullable(),
-  checkpointRequired: z.boolean(),
-  iphoneUseVersion: z.string().nullable(),
-});
-const scanItemSchema = z.object({
-  id: z.string().max(100),
-  scanId: z.string().max(100),
-  position: z.number().int().nonnegative(),
-  frame: z.string().refine(validFrame),
-  appraisalFrame: z.string().refine(validFrame).nullable(),
-  movesFrame: z.string().refine(validFrame).optional(),
-  measuredIV: z.array(z.number().int().min(0).max(15)).length(3).nullable().optional(),
-  fingerprint: z.string(),
-  pokemonId: z.string().nullable(),
-  fields: fieldsSchema.nullable(),
-  issues: z.array(z.string()),
-  protectionClear: z.boolean(),
-  favoriteRechecked: z.boolean().optional(),
-  evolutionSilhouette: z.union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")]).nullable().optional(),
-  maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
-  shinyReview: z
-    .object({
-      verdict: z.enum(["normal", "shiny", "uncertain"]),
-      model: z.string().max(100),
-      reason: z.string().max(500),
-      referenceHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).length(2).optional(),
-      reviewedAt: z.string().datetime(),
-    })
-    .optional(),
-  specialReview: z
-    .object({
-      verdict: z.enum(["normal", "shadow", "purified", "uncertain"]),
-      model: z.string().max(100),
-      reason: z.string().max(400),
-      reviewedAt: z.string().datetime(),
-    })
-    .optional(),
-  capturedAt: z.string().datetime(),
-  analyzedAt: z.string().datetime().optional(),
-});
-const transferBatchSchema = z.object({
-  id: z.string().max(100),
-  scanId: z.string().max(100),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  status: z.enum([
-    "draft",
-    "approved",
-    "running",
-    "paused",
-    "completed",
-    "stopped",
-    "stale",
-  ]),
-  mode: z.enum(["single", "bulk"]).optional(),
-  searchExclusions: z.array(z.enum([
-    "background", "lucky", "shiny", "costume", "shadow", "purified",
-    "favorite", "legendary", "mythical", "ultrabeast", "perfect",
-  ])).max(maxTransferSearchFilters).optional(),
-  selectedPokemonId: z.string().nullable().optional(),
-  needsBoxReturn: z.boolean().optional(),
-  signature: z.string(),
-  entries: z.array(
-    z.object({
-      pokemonId: z.string(),
-      status: z.enum([
-        "pending",
-        "searching",
-        "prepared",
-        "sent",
-        "submitted",
-        "confirmed",
-        "skipped",
-        "uncertain",
-      ]),
-      reason: z.string().nullable(),
-      preparedAt: z.string().optional(),
-      sentAt: z.string().optional(),
-      submittedAt: z.string().optional(),
-      confirmedAt: z.string().optional(),
-      evidence: z.string().optional(),
-    }),
-  ),
-  error: z.string().nullable(),
-  approvedAt: z.string().nullable(),
-  hiddenAt: z.string().nullable().optional(),
-});
-const snapshotSchema = z.object({
-  version: z.string().max(100),
-  updatedAt: z.string(),
-  sourceDate: z.string(),
-  sources: z.array(
-    z.object({ name: z.string(), url: z.string().url(), version: z.string() }),
-  ),
-  species: z.record(
-    z.string(),
-    z.object({
-      id: z.string(),
-      dex: z.number().int().min(1),
-      name: z.string(),
-      genderless: z.boolean().optional(),
-      genders: z.array(z.enum(["male", "female", "genderless"])).optional(),
-      types: z.array(z.string()),
-      atk: z.number().positive(),
-      def: z.number().positive(),
-      sta: z.number().positive(),
-      fast: z.array(z.string()),
-      charged: z.array(z.string()),
-      elite: z.array(z.string()),
-      tags: z.array(z.string()),
-      evolutions: z.array(
-        z.object({
-          id: z.string(),
-          candy: z.number().nonnegative(),
-          candyPurified: z.number().nonnegative().optional(),
-          condition: z.string().nullable(),
-          gender: z.string().optional(),
-        }),
-      ),
-      thirdMove: z.object({ dust: z.number(), candy: z.number() }).nullable(),
-      purification: z.object({ dust: z.number(), candy: z.number() }).optional(),
-      form: z.string().nullable(),
-    }),
-  ),
-  moves: z.record(
-    z.string(),
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      type: z.string(),
-      power: z.number().nonnegative(),
-      energy: z.number(),
-      duration: z.number().positive(),
-    }),
-  ),
-  rankings: z.record(
-    z.string(),
-    z.array(
-      z.object({
-        speciesId: z.string(),
-        score: z.number(),
-        moves: z.array(z.string()),
-      }),
-    ),
-  ),
-  cpm: z.array(z.number().positive()).min(51),
-  powerups: z.object({
-    dust: z.array(z.number().nonnegative()).min(49),
-    candy: z.array(z.number().nonnegative()).min(49),
-    xl: z.array(z.number().nonnegative()).min(10),
-  }),
-  names: z.record(z.string(), z.string()),
-  moveNames: z.record(z.string(), z.string()),
-  visualForms: z
-    .record(z.string(), z.array(z.object({ id: z.string(), label: z.string() })))
-    .optional(),
-  warnings: z.array(z.string()),
-});
 const backupSchema = z.object({
   format: z.literal("pogo-local-backup"),
   version: z.union([z.literal(1), z.literal(2)]),
-  pokemon: z.array(pokemonBackupSchema).max(20000),
+  pokemon: z.array(pokemonSchema).max(20000),
   observations: z.array(observationSchema).max(50000),
   settings: settingsSchema,
   snapshot: snapshotSchema.nullable(),
@@ -332,7 +98,7 @@ export async function importBackup(input: unknown) {
   transaction(() => {
     for (const p of backup.pokemon)
       if (!get("pokemon", p.id)) {
-        put("pokemon", p.id, { ...p, analysis: null } as Pokemon);
+        put("pokemon", p.id, { ...p, analysis: null });
         imported++;
       }
     for (const o of backup.observations)
@@ -344,7 +110,7 @@ export async function importBackup(input: unknown) {
           status: scan.status === "completed" ? "completed" : "stopped",
           stage: "從備份還原的歷史掃描",
           error: null,
-        } as Scan);
+        });
     for (const item of backup.scanItems || [])
       if (!get("scan_items", item.id)) put("scan_items", item.id, item);
     for (const batch of backup.transferBatches || [])
@@ -363,12 +129,12 @@ export async function importBackup(input: unknown) {
                   reason: "備份還原；不會恢復執行授權",
                 },
           ),
-        } as TransferBatch);
+        });
     if (!get("settings", "preferences"))
       put("settings", "preferences", backup.settings);
   });
   if (!getSnapshot() && backup.snapshot)
-    saveSnapshot(backup.snapshot as Snapshot);
+    saveSnapshot(backup.snapshot);
   reevaluate();
   return { imported, skipped: backup.pokemon.length - imported };
 }

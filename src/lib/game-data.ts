@@ -413,7 +413,8 @@ export function normalizeData(
       mega: pvpMegaBases.has(baseId) ||
         Boolean(g?.tempEvoOverrides?.some((o: Raw) => o.tempEvoId)),
       maxForms: maxForms(baseId),
-      thirdMove: g?.thirdMove
+      // Smeargle cannot unlock a second move; it lists only an unreachable candy cost.
+      thirdMove: g?.thirdMove?.stardustToUnlock
         ? {
             dust: g.thirdMove.stardustToUnlock,
             candy: g.thirdMove.candyToUnlock,

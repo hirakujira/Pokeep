@@ -1505,6 +1505,7 @@ test("v2 備份保存手機歷史，但還原後沒有放生授權", async () =>
     entries: [
       { pokemonId: "candidate", status: "sent", reason: null },
       { pokemonId: "already-tapped", status: "submitted", reason: "未核對遊戲結果", submittedAt: stamp },
+      { pokemonId: "favorite", status: "unfavoriting", reason: null },
     ],
     error: null,
     approvedAt: stamp,
@@ -1531,6 +1532,10 @@ test("v2 備份保存手機歷史，但還原後沒有放生授權", async () =>
   assert.equal(
     store.get<TransferBatch>("transfer_batches", batch.id)?.entries[1].status,
     "submitted",
+  );
+  assert.equal(
+    store.get<TransferBatch>("transfer_batches", batch.id)?.entries[2].status,
+    "uncertain",
   );
   assert.equal(
     store.get<TransferBatch>("transfer_batches", batch.id)?.approvedAt,

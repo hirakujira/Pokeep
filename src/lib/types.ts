@@ -75,51 +75,67 @@ export const fieldLabels: Record<keyof Fields, string> = {
   purificationDust: "淨化星塵",
   purificationCandy: "淨化糖果",
 };
-export type Evidence = {
-  observationId: string;
-  frame: string;
-  time: number;
-  video: string;
-  fields: (keyof Fields)[];
-  source?: "video" | "iphone";
-  capturedAt?: string;
-  scanItemId?: string;
-};
-export type Observation = {
-  id: string;
-  jobId: string;
-  segment: string;
-  frame: string;
-  time: number;
-  video: string;
-  fields: Fields;
-  issues: string[];
-  ivMeasured: number[] | null;
-  kind: string;
-  source?: "video" | "iphone";
-  capturedAt?: string;
-  scanItemId?: string;
-};
-export type Pokemon = {
-  id: string;
-  jobId: string;
-  fields: Fields;
-  overrides: Partial<Fields>;
-  sources: Evidence[];
-  issues: string[];
-  candidates: string[];
-  verified: boolean;
-  verification?: "human" | "automatic" | null;
-  /** true: unregistered silhouette; false: coloured icon; unavailable: no button; unknown-branch: uncertain destination. */
-  evolutionSilhouette?: boolean | "unavailable" | "unknown-branch" | null;
-  /** Badge on the iPhone detail page; null means that it was not readable. */
-  maxStatus?: MaxStatus | null;
-  locked: boolean;
-  owned: boolean;
-  createdAt: string;
-  updatedAt: string;
-  analysis: Analysis | null;
-};
+// Stored records are typed from the same schemas that validate backups, so a
+// new field cannot be silently dropped on restore.
+export const validFrame = (frame: string) =>
+  /^[a-zA-Z0-9-]{1,80}\/[a-zA-Z0-9_-]{1,140}\.jpg$/.test(frame);
+export const frameSchema = z.string().refine(validFrame);
+export const ivMeasuredSchema = z.array(z.number().int().min(0).max(15)).length(3).nullable();
+/** true: unregistered silhouette; false: coloured icon; unavailable: no button; unknown-branch: uncertain destination. */
+export const evolutionSilhouetteSchema = z
+  .union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")])
+  .nullable();
+/** Badge on the iPhone detail page; null means that it was not readable. */
+export const maxStatusSchema = z.enum(["none", "dynamax", "gigantamax"]).nullable();
+const evidenceSchema = z.object({
+  observationId: z.string().max(100),
+  frame: frameSchema,
+  time: z.number().min(0).max(600),
+  video: z.string().max(200),
+  fields: z.array(
+    z.enum(Object.keys(fieldsSchema.shape) as [keyof Fields, ...(keyof Fields)[]]),
+  ),
+  source: z.enum(["video", "iphone"]).optional(),
+  capturedAt: z.string().datetime().optional(),
+  scanItemId: z.string().max(100).optional(),
+});
+export type Evidence = z.infer<typeof evidenceSchema>;
+export const observationSchema = z.object({
+  id: z.string().max(100),
+  jobId: z.string().max(100),
+  segment: z.string().max(100),
+  frame: frameSchema,
+  time: z.number().min(0).max(600),
+  video: z.string().max(200),
+  fields: fieldsSchema,
+  issues: z.array(z.string().max(500)),
+  ivMeasured: ivMeasuredSchema,
+  kind: z.string().max(50),
+  source: z.enum(["video", "iphone"]).optional(),
+  capturedAt: z.string().datetime().optional(),
+  scanItemId: z.string().max(100).optional(),
+});
+export type Observation = z.infer<typeof observationSchema>;
+export const pokemonSchema = z.object({
+  id: z.string().min(1).max(100),
+  jobId: z.string().max(100),
+  fields: fieldsSchema,
+  overrides: fieldsSchema.partial(),
+  sources: z.array(evidenceSchema).max(10000),
+  issues: z.array(z.string().max(500)).max(1000),
+  candidates: z.array(z.string().max(100)).max(1000),
+  verified: z.boolean(),
+  verification: z.enum(["human", "automatic"]).nullable().optional(),
+  evolutionSilhouette: evolutionSilhouetteSchema.optional(),
+  maxStatus: maxStatusSchema.optional(),
+  locked: z.boolean(),
+  owned: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  // Not validated: importing a backup discards the analysis and evaluates again.
+  analysis: z.custom<Analysis | null>(),
+});
+export type Pokemon = z.infer<typeof pokemonSchema>;
 export type Cost = {
   dust: number;
   candy: number;
@@ -238,80 +254,94 @@ export type Job = {
   notices: string[];
   attempts: number;
 };
-export type Species = {
-  id: string;
-  dex: number;
-  name: string;
+export const speciesSchema = z.object({
+  id: z.string(),
+  dex: z.number().int().min(1),
+  name: z.string(),
   /** True when the species is always genderless. */
-  genderless?: boolean;
+  genderless: z.boolean().optional(),
   /** Genders this species can have; missing when the Game Master gives none. */
-  genders?: Gender[];
-  types: string[];
-  atk: number;
-  def: number;
-  sta: number;
-  fast: string[];
-  charged: string[];
-  elite: string[];
-  tags: string[];
-  evolutions: {
-    id: string;
-    candy: number;
-    /** Candy a purified Pokémon pays; missing when the Game Master lists none. */
-    candyPurified?: number;
-    condition: string | null;
-    gender?: string;
-  }[];
+  genders: z.array(z.enum(["male", "female", "genderless"])).optional(),
+  types: z.array(z.string()),
+  atk: z.number().positive(),
+  def: z.number().positive(),
+  sta: z.number().positive(),
+  fast: z.array(z.string()),
+  charged: z.array(z.string()),
+  elite: z.array(z.string()),
+  tags: z.array(z.string()),
+  evolutions: z.array(
+    z.object({
+      id: z.string(),
+      candy: z.number().nonnegative(),
+      /** Candy a purified Pokémon pays; missing when the Game Master lists none. */
+      candyPurified: z.number().nonnegative().optional(),
+      condition: z.string().nullable(),
+      gender: z.string().optional(),
+    }),
+  ),
   /** True when the species can Mega Evolve or undergo Primal Reversion. */
-  mega?: boolean;
+  mega: z.boolean().optional(),
   /** Max forms this species can have; missing when the snapshot predates the Max data. */
-  maxForms?: ("dynamax" | "gigantamax")[];
-  thirdMove: { dust: number; candy: number } | null;
+  maxForms: z.array(z.enum(["dynamax", "gigantamax"])).optional(),
+  thirdMove: z.object({ dust: z.number(), candy: z.number() }).nullable(),
   /** Cost to purify the shadow form; missing when the Game Master lists none or the snapshot predates it. */
-  purification?: { dust: number; candy: number };
-  form: string | null;
-};
+  purification: z.object({ dust: z.number(), candy: z.number() }).optional(),
+  form: z.string().nullable(),
+});
+export type Species = z.infer<typeof speciesSchema>;
 /** An appearance-only form; `label` is the Traditional Chinese text stored in Fields.form. */
-export type VisualForm = { id: string; label: string };
-export type Move = {
-  id: string;
-  name: string;
-  type: string;
-  power: number;
-  energy: number;
-  duration: number;
-};
-export type Snapshot = {
-  version: string;
-  updatedAt: string;
-  sourceDate: string;
-  sources: { name: string; url: string; version: string }[];
-  species: Record<string, Species>;
-  moves: Record<string, Move>;
-  rankings: Record<
-    string,
-    { speciesId: string; score: number; moves: string[] }[]
-  >;
-  cpm: number[];
-  powerups: { dust: number[]; candy: number[]; xl: number[] };
-  names: Record<string, string>;
-  moveNames: Record<string, string>;
+const visualFormSchema = z.object({ id: z.string(), label: z.string() });
+export type VisualForm = z.infer<typeof visualFormSchema>;
+const moveSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.string(),
+  power: z.number().nonnegative(),
+  energy: z.number(),
+  duration: z.number().positive(),
+});
+export type Move = z.infer<typeof moveSchema>;
+/** The game-data snapshot; backups validate against this same schema. */
+export const snapshotSchema = z.object({
+  version: z.string().max(100),
+  updatedAt: z.string(),
+  sourceDate: z.string(),
+  sources: z.array(
+    z.object({ name: z.string(), url: z.string().url(), version: z.string() }),
+  ),
+  species: z.record(z.string(), speciesSchema),
+  moves: z.record(z.string(), moveSchema),
+  rankings: z.record(
+    z.string(),
+    z.array(
+      z.object({
+        speciesId: z.string(),
+        score: z.number(),
+        moves: z.array(z.string()),
+      }),
+    ),
+  ),
+  cpm: z.array(z.number().positive()).min(51),
+  powerups: z.object({
+    dust: z.array(z.number().nonnegative()).min(49),
+    candy: z.array(z.number().nonnegative()).min(49),
+    xl: z.array(z.number().nonnegative()).min(10),
+  }),
+  names: z.record(z.string(), z.string()),
+  moveNames: z.record(z.string(), z.string()),
   /** Appearance-only forms by dex; absent in snapshots saved before forms were collected. */
-  visualForms?: Record<string, VisualForm[]>;
-  warnings: string[];
-};
-export type Settings = {
-  raidSlots: number;
-  metaCutoff: number;
-  ivCutoff: number;
-  rareRepresentatives: number;
-};
+  visualForms: z.record(z.string(), z.array(visualFormSchema)).optional(),
+  warnings: z.array(z.string()),
+});
+export type Snapshot = z.infer<typeof snapshotSchema>;
 export const settingsSchema = z.object({
   raidSlots: z.number().int().min(1).max(24),
   metaCutoff: z.number().int().min(1).max(300),
   ivCutoff: z.number().int().min(1).max(4096),
   rareRepresentatives: z.number().int().min(1).max(10),
 });
+export type Settings = z.infer<typeof settingsSchema>;
 export const defaultSettings: Settings = {
   raidSlots: 6,
   metaCutoff: 100,

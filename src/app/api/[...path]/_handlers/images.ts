@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "@/lib/store";
-import { validFrame } from "@/lib/backup";
+import { validFrame } from "@/lib/types";
 import { pokemonSprite } from "@/lib/sprites";
 import { json } from "./http";
 

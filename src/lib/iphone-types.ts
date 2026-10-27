@@ -1,108 +1,129 @@
-import type { Fields } from "./types";
-import type { MaxStatus } from "./max-status";
-import type { TransferSearchFilter } from "./transfer-search-filters";
+import { z } from "zod";
+import {
+  evolutionSilhouetteSchema,
+  fieldsSchema,
+  frameSchema,
+  ivMeasuredSchema,
+  maxStatusSchema,
+} from "./types";
+import {
+  maxTransferSearchFilters,
+  transferSearchFilters,
+  type TransferSearchFilter,
+} from "./transfer-search-filters";
 
-export type ScanStatus =
-  "queued" | "running" | "paused" | "completed" | "stopped" | "failed";
-export type Scan = {
-  id: string;
-  scope: "results" | "all";
-  status: ScanStatus;
-  stage: string;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  scanned: number;
-  phase?: "capture" | "analysis";
-  analyzed?: number;
-  review: number;
-  expected: number | null;
-  sort: string | null;
-  currentFrame: string | null;
-  lastFingerprint: string | null;
-  apiUsage: {
-    input: number;
-    output: number;
-    requests: number;
-    cached: number;
-    navigationRequests?: number;
-    dataRequests?: number;
-  };
-  error: string | null;
-  checkpointRequired: boolean;
-  iphoneUseVersion: string | null;
-};
-export type ScanItem = {
-  id: string;
-  scanId: string;
-  position: number;
-  frame: string;
-  appraisalFrame: string | null;
-  movesFrame?: string;
-  measuredIV?: number[] | null;
-  fingerprint: string;
-  pokemonId: string | null;
-  fields: Fields | null;
-  issues: string[];
-  protectionClear: boolean;
-  favoriteRechecked?: boolean;
-  evolutionSilhouette?: boolean | "unavailable" | "unknown-branch" | null;
-  maxStatus?: MaxStatus | null;
-  shinyReview?: {
-    verdict: "normal" | "shiny" | "uncertain";
-    model: string;
-    reason: string;
-    referenceHashes?: string[];
-    reviewedAt: string;
-  };
-  specialReview?: {
-    verdict: "normal" | "shadow" | "purified" | "uncertain";
-    model: string;
-    reason: string;
-    reviewedAt: string;
-  };
-  capturedAt: string;
-  analyzedAt?: string;
-};
-export type TransferEntry = {
-  pokemonId: string;
-  status:
-    | "pending"
-    | "searching"
-    | "unfavoriting"
-    | "prepared"
-    | "sent"
-    | "submitted"
-    | "confirmed"
-    | "skipped"
-    | "uncertain";
-  reason: string | null;
-  preparedAt?: string;
-  sentAt?: string;
-  submittedAt?: string;
-  confirmedAt?: string;
-  evidence?: string;
-};
-export type TransferBatch = {
-  id: string;
-  scanId: string;
-  createdAt: string;
-  updatedAt: string;
-  status:
-    | "draft"
-    | "approved"
-    | "running"
-    | "paused"
-    | "completed"
-    | "stopped"
-    | "stale";
-  mode?: "single" | "bulk";
-  searchExclusions?: TransferSearchFilter[];
-  selectedPokemonId?: string | null;
-  needsBoxReturn?: boolean;
-  signature: string;
-  entries: TransferEntry[];
-  error: string | null;
-  approvedAt: string | null;
-  hiddenAt?: string | null;
-};
+export const scanSchema = z.object({
+  id: z.string().max(100),
+  scope: z.enum(["results", "all"]),
+  status: z.enum(["queued", "running", "paused", "completed", "stopped", "failed"]),
+  stage: z.string().max(500),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
+  scanned: z.number().int().nonnegative(),
+  phase: z.enum(["capture", "analysis"]).optional(),
+  analyzed: z.number().int().nonnegative().optional(),
+  review: z.number().int().nonnegative(),
+  expected: z.number().int().nonnegative().nullable(),
+  sort: z.string().nullable(),
+  currentFrame: z.string().nullable(),
+  lastFingerprint: z.string().nullable(),
+  apiUsage: z.object({
+    input: z.number(),
+    output: z.number(),
+    requests: z.number(),
+    cached: z.number(),
+    navigationRequests: z.number().optional(),
+    dataRequests: z.number().optional(),
+  }),
+  error: z.string().nullable(),
+  checkpointRequired: z.boolean(),
+  iphoneUseVersion: z.string().nullable(),
+});
+export type Scan = z.infer<typeof scanSchema>;
+export type ScanStatus = Scan["status"];
+export const scanItemSchema = z.object({
+  id: z.string().max(100),
+  scanId: z.string().max(100),
+  position: z.number().int().nonnegative(),
+  frame: frameSchema,
+  appraisalFrame: frameSchema.nullable(),
+  movesFrame: frameSchema.optional(),
+  measuredIV: ivMeasuredSchema.optional(),
+  fingerprint: z.string(),
+  pokemonId: z.string().nullable(),
+  fields: fieldsSchema.nullable(),
+  issues: z.array(z.string()),
+  protectionClear: z.boolean(),
+  favoriteRechecked: z.boolean().optional(),
+  evolutionSilhouette: evolutionSilhouetteSchema.optional(),
+  maxStatus: maxStatusSchema.optional(),
+  shinyReview: z
+    .object({
+      verdict: z.enum(["normal", "shiny", "uncertain"]),
+      model: z.string().max(100),
+      reason: z.string().max(500),
+      referenceHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).length(2).optional(),
+      reviewedAt: z.string().datetime(),
+    })
+    .optional(),
+  specialReview: z
+    .object({
+      verdict: z.enum(["normal", "shadow", "purified", "uncertain"]),
+      model: z.string().max(100),
+      reason: z.string().max(400),
+      reviewedAt: z.string().datetime(),
+    })
+    .optional(),
+  capturedAt: z.string().datetime(),
+  analyzedAt: z.string().datetime().optional(),
+});
+export type ScanItem = z.infer<typeof scanItemSchema>;
+const transferEntrySchema = z.object({
+  pokemonId: z.string(),
+  status: z.enum([
+    "pending",
+    "searching",
+    "unfavoriting",
+    "prepared",
+    "sent",
+    "submitted",
+    "confirmed",
+    "skipped",
+    "uncertain",
+  ]),
+  reason: z.string().nullable(),
+  preparedAt: z.string().optional(),
+  sentAt: z.string().optional(),
+  submittedAt: z.string().optional(),
+  confirmedAt: z.string().optional(),
+  evidence: z.string().optional(),
+});
+export type TransferEntry = z.infer<typeof transferEntrySchema>;
+export const transferBatchSchema = z.object({
+  id: z.string().max(100),
+  scanId: z.string().max(100),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  status: z.enum(["draft", "approved", "running", "paused", "completed", "stopped", "stale"]),
+  mode: z.enum(["single", "bulk"]).optional(),
+  searchExclusions: z
+    .array(
+      z.enum(
+        transferSearchFilters.map((filter) => filter.id) as [
+          TransferSearchFilter,
+          ...TransferSearchFilter[],
+        ],
+      ),
+    )
+    .max(maxTransferSearchFilters)
+    .optional(),
+  selectedPokemonId: z.string().nullable().optional(),
+  needsBoxReturn: z.boolean().optional(),
+  signature: z.string(),
+  entries: z.array(transferEntrySchema),
+  error: z.string().nullable(),
+  approvedAt: z.string().nullable(),
+  hiddenAt: z.string().nullable().optional(),
+});
+export type TransferBatch = z.infer<typeof transferBatchSchema>;
