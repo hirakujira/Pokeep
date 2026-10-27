@@ -42,6 +42,23 @@ function rarity(f: Fields, snapshot: Snapshot | null) {
   const tags = f.speciesId ? snapshot?.species[f.speciesId]?.tags : undefined;
   return rarityLabels.find(([tag]) => tags?.includes(tag))?.[1] ?? null;
 }
+// Keep reasons in display order; the results list shows only reasons[0].
+// Anything unmatched (comparison notes such as 已人工確認…) sorts last.
+const keepReasonOrder = [
+  /^已由你鎖定保留$/,
+  /^已確認色違/,
+  /入選 ?(PvP|團體戰)/,
+  new RegExp(`^(${rarityLabels.map(([, label]) => label).join("|")})，`),
+  /^(特殊造型保留|保留此特殊收藏的代表個體)/,
+  /^保留此物種的極巨化收藏代表$/,
+  /^保留超級.+進化線的收藏代表$/,
+  /高 IV 收藏代表$/,
+  /^進化結果不明；保留/,
+];
+function keepReasonRank(reason: string) {
+  const index = keepReasonOrder.findIndex((pattern) => pattern.test(reason));
+  return index < 0 ? keepReasonOrder.length : index;
+}
 function unresolvedMissingEvolution(
   pokemon: Pokemon,
   living: Pokemon[],
@@ -268,4 +285,6 @@ export function categorize(p: Pokemon, d: CollectionDecisions) {
     if (d.snapshot) a.moveTraining = moveTraining(f, picks, d.snapshot);
   }
   a.reasons = [...new Set(a.reasons)];
+  if (a.category === "collect" || a.category === "invest")
+    a.reasons.sort((x, y) => keepReasonRank(x) - keepReasonRank(y));
 }

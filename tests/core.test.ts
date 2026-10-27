@@ -211,6 +211,46 @@ test("保留理由明示 PvP、團體戰，且屬性使用中文", () => {
   assert.equal(typeName("psychic"), "超能力");
 });
 
+test("保留理由依優先度排序，列表第一條顯示最重要的理由", () => {
+  const snapshot = fixture();
+  snapshot.version = "keep-reason-order-fixture";
+  snapshot.rankings["10000"] = [{ speciesId: "caterpie", score: 100, moves: [] }];
+  snapshot.moves.STRUGGLE.type = "bug";
+  snapshot.species.caterpie.tags = ["mythical"];
+  const [invest] = evaluateCollection(
+    [record("rare-combat", {}, { evolutionSilhouette: "unavailable" })], snapshot, settings,
+  );
+  assert.equal(invest.analysis?.category, "invest");
+  assert.match(invest.analysis?.reasons[0] || "", /入選 PvP/);
+  assert.match(invest.analysis?.reasons[1] || "", /入選團體戰/);
+  assert.equal(invest.analysis?.reasons[2], "幻之寶可夢，保留且不列入放生候選");
+  assert.equal(invest.analysis?.reasons.at(-1), "已人工確認此個體沒有進化按鈕");
+  const [locked] = evaluateCollection(
+    [record("rare-locked", {}, { locked: true })], snapshot, settings,
+  );
+  assert.equal(locked.analysis?.reasons[0], "已由你鎖定保留");
+
+  snapshot.species.sandslash_alolan = species("sandslash_alolan", { form: "(Alolan)" });
+  const target = snapshot.species.sandslash_alolan;
+  const [best, second] = evaluateCollection(
+    ([["阿羅拉", [14, 14, 14]], ["alolan", [13, 14, 15]]] as const)
+      .map(([form, iv], index) => record(`sandslash-${index}`, {
+        speciesId: "sandslash_alolan", form,
+        ivAtk: iv[0], ivDef: iv[1], ivSta: iv[2],
+        cp: combatPower(target, [...iv], 20, snapshot),
+        hp: hitPoints(target, iv[2], 20, snapshot),
+      }, { evolutionSilhouette: "unavailable" })),
+    snapshot, { ...settings, raidSlots: 0, rareRepresentatives: 2 },
+  );
+  assert.deepEqual(best.analysis?.reasons, [
+    "保留此特殊收藏的代表個體",
+    "IV 42/45；保留此物種已核對個體中最佳的高 IV 收藏代表",
+    "已人工確認此個體沒有進化按鈕",
+  ]);
+  assert.equal(second.analysis?.category, "collect");
+  assert.equal(second.analysis?.reasons[0], "保留此特殊收藏的代表個體");
+});
+
 test("招式學習器依招式池分出一般／厲害、成功率、遷怒限制與先進化", () => {
   const snapshot = fixture();
   snapshot.version = "move-training-fixture";
