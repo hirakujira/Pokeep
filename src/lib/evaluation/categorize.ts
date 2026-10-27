@@ -33,6 +33,15 @@ export type CollectionDecisions = {
   megaVenusaur: LineChoice;
 };
 
+const rarityLabels = [
+  ["mythical", "幻之寶可夢"],
+  ["legendary", "傳說寶可夢"],
+  ["ultrabeast", "究極異獸"],
+] as const;
+function rarity(f: Fields, snapshot: Snapshot | null) {
+  const tags = f.speciesId ? snapshot?.species[f.speciesId]?.tags : undefined;
+  return rarityLabels.find(([tag]) => tags?.includes(tag))?.[1] ?? null;
+}
 function unresolvedMissingEvolution(
   pokemon: Pokemon,
   living: Pokemon[],
@@ -114,6 +123,7 @@ function assignCategory(
 ) {
   const snapshot = d.snapshot;
   const evolution = d.evolution.winners.get(p.id);
+  const rare = rarity(f, snapshot);
   if (p.locked) {
     a.category = "collect";
     a.reasons.unshift("已由你鎖定保留");
@@ -153,14 +163,7 @@ function assignCategory(
     a.category = "collect";
     a.reasons.unshift("進化結果不明；保留待確認目標與進化方式");
   }
-  else if (
-    f.speciesId && snapshot?.species[f.speciesId]?.tags.some((tag) =>
-      ["legendary", "mythical", "ultrabeast"].includes(tag),
-    )
-  ) {
-    a.category = "collect";
-    a.reasons.unshift("傳說、幻之或究極異獸，保留且不列入放生候選");
-  }
+  else if (rare) a.category = "collect";
   else if (p.maxStatus == null) {
     a.category = "review";
     a.reasons.unshift("極巨化狀態未能從能力頁確認，放生前請核對");
@@ -175,6 +178,8 @@ function assignCategory(
       "在已匯入且仍持有的個體中，未入選收藏代表、PvP 名額或團體戰隊伍",
     );
   }
+  if (rare && (a.category === "collect" || a.category === "invest"))
+    a.reasons.unshift(`${rare}，保留且不列入放生候選`);
 }
 function addPeerReasons(p: Pokemon, a: Analysis, d: CollectionDecisions) {
   if (p.evolutionSilhouette === "unavailable")

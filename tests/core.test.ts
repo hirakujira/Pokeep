@@ -325,6 +325,35 @@ test("同物種多隻傳說寶可夢都不列入可放生", () => {
   );
   assert.ok(evaluated.every((pokemon) => pokemon.analysis?.category === "collect"));
   assert.ok(evaluated.every((pokemon) => transferExclusion(pokemon, snapshot) === "傳說、幻之或究極異獸"));
+  assert.ok(evaluated.every((pokemon) =>
+    pokemon.analysis?.reasons[0] === "傳說寶可夢，保留且不列入放生候選" &&
+    !pokemon.analysis.reasons.includes("保留此特殊收藏的代表個體"),
+  ));
+});
+
+test("幻之寶可夢先顯示稀有度，同形態不同寫法歸入同一收藏組", () => {
+  const snapshot = fixture();
+  snapshot.species.deoxys_attack = species("deoxys_attack", {
+    form: "(Attack)", tags: ["mythical"],
+  });
+  const target = snapshot.species.deoxys_attack;
+  const evaluated = evaluateCollection(
+    ([["攻擊形態", [15, 15, 14]], ["(Attack)", [15, 14, 13]], ["attack", [12, 12, 12]]] as const)
+      .map(([form, iv], index) => record(`deoxys-${index}`, {
+        speciesId: "deoxys_attack", form,
+        ivAtk: iv[0], ivDef: iv[1], ivSta: iv[2],
+        cp: combatPower(target, [...iv], 20, snapshot),
+        hp: hitPoints(target, iv[2], 20, snapshot),
+      })),
+    snapshot, { ...settings, raidSlots: 0, rareRepresentatives: 1 },
+  );
+  assert.ok(evaluated.every((pokemon) => pokemon.analysis?.category === "collect"));
+  assert.ok(evaluated.every((pokemon) =>
+    pokemon.analysis?.reasons[0] === "幻之寶可夢，保留且不列入放生候選",
+  ));
+  const reasons = evaluated.map((pokemon) => pokemon.analysis?.reasons || []);
+  assert.deepEqual(reasons.map((r) => r.includes("保留此特殊收藏的代表個體")), [true, false, false]);
+  assert.deepEqual(reasons.map((r) => r.some((x) => x.includes("高 IV 收藏代表"))), [true, false, false]);
 });
 
 test("未登錄進化剪影與已匯入收藏缺少下一階即列為可進化", () => {

@@ -45,16 +45,18 @@ function baseAnalysis(p: Pokemon, snapshot: Snapshot | null): Analysis {
     evaluatedAt: now(),
   };
 }
+// A form-specific species ID already names its form; scanned labels for the
+// same form vary ("攻擊形態", "(Attack)", "attack") and must not split groups.
+export function collectionForm(f: Fields, s: Species) {
+  if (s.form) return s.form;
+  return !f.form || f.form === "一般" || f.form === "normal" ? "normal" : f.form;
+}
 function collectionKeys(f: Fields, s: Species) {
   const keys: string[] = [];
-  const collectionForm = !s.form && (!f.form || f.form === "一般" || f.form === "normal")
-    ? "normal" : f.form || s.form;
-  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm}/${collectionCostume(f.speciesId, f.costume) || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
+  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm(f, s)}/${collectionCostume(f.speciesId, f.costume) || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
   if (f.shiny) keys.push(`${prefix}/shiny`);
   if (f.costume) keys.push(`${prefix}/costume`);
   if (s.form) keys.push(`${prefix}/form`);
-  if (s.tags.some((t) => ["legendary", "mythical", "ultrabeast"].includes(t)))
-    keys.push(`${prefix}/rare`);
   const iv = [f.ivAtk, f.ivDef, f.ivSta];
   if (iv.every((v) => v === 15)) keys.push(`${prefix}/perfect`);
   if (iv.every((v) => v === 0)) keys.push(`${prefix}/zero`);

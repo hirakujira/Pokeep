@@ -10,7 +10,7 @@ import {
 } from "../types";
 import { specialStateFromMoves } from "../iphone-safety";
 import { typeName } from "../type-names";
-import { assess } from "./assess";
+import { assess, collectionForm } from "./assess";
 import type { CombatPick } from "./move-training";
 import {
   categorize,
@@ -44,18 +44,19 @@ function pickCollectibles(living: Pokemon[], settings: Settings, add: AddPick) {
       .slice(0, settings.rareRepresentatives)
       .forEach((p) => add(p, "保留此特殊收藏的代表個體", peers));
 }
-function pickHighIv(confirmed: Pokemon[], add: AddPick) {
+function pickHighIv(confirmed: Pokemon[], snapshot: Snapshot | null, add: AddPick) {
   const highIvGroups = new Map<string, Pokemon[]>();
   for (const p of confirmed) {
     const f = effective(p);
+    const s = f.speciesId ? snapshot?.species[f.speciesId] : undefined;
     if (
-      !f.speciesId || f.ivAtk === null || f.ivDef === null ||
+      !s || f.ivAtk === null || f.ivDef === null ||
       f.ivSta === null || f.ivAtk + f.ivDef + f.ivSta < 40 ||
       f.shadow === null || f.purified === null || f.shiny === null ||
       f.costume !== null || p.maxStatus == null ||
       specialStateFromMoves(f).conflict
     ) continue;
-    const key = `${f.speciesId}/${f.form || "normal"}/${f.shadow}`;
+    const key = `${f.speciesId}/${collectionForm(f, s)}/${f.shadow}`;
     highIvGroups.set(key, [...(highIvGroups.get(key) || []), p]);
   }
   const highIvPeers = new Map<string, string>();
@@ -371,7 +372,7 @@ export function evaluateCollection(
       { reason, peers: peers.filter((q) => q.id !== p.id).map((q) => q.id), ...combat },
     ]);
   pickCollectibles(living, settings, add);
-  const highIvPeers = pickHighIv(confirmed, add);
+  const highIvPeers = pickHighIv(confirmed, snapshot, add);
   pickPvp(confirmed, settings, add);
   pickRaids(confirmed, settings, add);
   const evolution = chooseEvolutions(living, snapshot, settings);
