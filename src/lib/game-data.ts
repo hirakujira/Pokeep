@@ -42,7 +42,7 @@ const norm = (s: string) =>
     .replace(/paldean/g, "paldea");
 // PvPoke marks these available, special-case Pokémon as unreleased because
 // ordinary PvP simulations do not cover them. They still belong in the catalog.
-const catalogExceptions = new Set(["ditto", "shedinja", "cosmog"]);
+const catalogExceptions = new Set(["ditto", "shedinja", "cosmog", "cosmoem"]);
 // GO's zh-Hant text has no names past #1008; these come from the official Taiwan Pokédex.
 const missingSpeciesNames: Record<number, string> = {
   1011: "裹蜜蟲",

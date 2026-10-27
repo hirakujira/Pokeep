@@ -1325,7 +1325,7 @@ test("物種目錄包含脫殼忍者與已知形態，補上文字檔缺少的�
   const pokemon = Array.from({ length: 100 }, (_, index) =>
     base(`fixture_${index}`, index + 1, true));
   pokemon.push(base("shedinja", 292, false), base("ditto", 132, false),
-    base("cosmog", 789, false), base("unreleased_fixture", 9999, false),
+    base("cosmog", 789, false), base("cosmoem", 790, false), base("unreleased_fixture", 9999, false),
     base("dipplin", 1011, true));
   const gm = [
     { templateId: "PLAYER_LEVEL_SETTINGS", data: {
@@ -1343,6 +1343,7 @@ test("物種目錄包含脫殼忍者與已知形態，補上文字檔缺少的�
   assert.equal(normalized.species.dipplin.name, "裹蜜蟲");
   assert.ok(normalized.species.ditto);
   assert.ok(normalized.species.cosmog);
+  assert.ok(normalized.species.cosmoem);
   assert.equal(normalized.species.unreleased_fixture, undefined);
   normalized.species.nidoran_male = species("nidoran_male", { dex: 32, name: "尼多朗" });
   normalized.species.squawkabilly = species("squawkabilly", { dex: 931, name: "怒鸚哥" });
