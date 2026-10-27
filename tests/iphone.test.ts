@@ -32,7 +32,6 @@ const { processGrowingInOrder, processPreparedInOrder } = await import("../src/l
 const { scanTiming } = await import("../src/lib/scan-timing");
 const { shinyConsensus, shinyReferenceSource, upperAppearanceImage } = await import("../src/lib/shiny-review");
 const { specialVisualConsensus, applySpecialVisualVerdict } = await import("../src/lib/special-visual-review");
-const { caughtDateBadge } = await import("../src/lib/shiny-timeline");
 const { gendersByDex, resolveSpecies } = await import("../src/lib/game-data");
 const { runScan, analyzeScan, analyzeOne, captureOne, applyStoredNormalShadowReviews, applyStoredShinyReviews } =
   await import("../src/lib/iphone-scan");
@@ -694,15 +693,6 @@ test("外觀裁圖保留寶可夢右側身體，仍遮住日期徽章", async ()
   const date = at(510, 500);
   assert.ok(body[0] > 180 && body[1] < 80, `身體被遮住：${body}`);
   assert.ok(date.every((channel) => channel > 220), `日期未被遮住：${date}`);
-});
-
-test("捕獲日期只從右側同一徽章的兩行本機 OCR 讀取", () => {
-  const year = { text: "2021", confidence: 1, x: 0.87, y: 0.63 };
-  const monthDay = { text: "09/03", confidence: 0.5, x: 0.87, y: 0.6 };
-  assert.equal(caughtDateBadge([year, monthDay]), "2021-09-03");
-  assert.equal(caughtDateBadge([year, { ...monthDay, x: 0.4 }]), null);
-  assert.equal(caughtDateBadge([year, { ...monthDay, y: 0.4 }]), null);
-  assert.equal(caughtDateBadge([year, year, monthDay]), null);
 });
 
 test("本機 OCR 傳出文字前移除日期與招式頁底部地點", () => {

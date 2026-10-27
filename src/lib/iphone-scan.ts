@@ -11,7 +11,5 @@ export { mergeScreens, analyzeOne } from "./iphone-scanning/analysis";
 export {
   applyStoredNormalShadowReviews,
   applyStoredShinyReviews,
-  reviewUnknownSpecialStates,
-  reviewUnknownShiny,
 } from "./iphone-scanning/reviews";
 export { analyzeScan, runScan } from "./iphone-scanning/run";

@@ -122,14 +122,7 @@ export function applyStoredShinyReviews(scanId: string) {
 }
 
 /** Recheck visible special effects in two saved moments; never touch the phone. */
-export async function reviewUnknownSpecialStates(
-  scanId: string,
-  allowCompleted = false,
-) {
-  const active = () => {
-    const status = get<Scan>("scans", scanId)?.status;
-    return status === "running" || (allowCompleted && status === "completed");
-  };
+export async function reviewUnknownSpecialStates(scanId: string) {
   const candidates = scanItems(scanId).filter((item) => {
     if (item.specialReview || !item.pokemonId || !item.appraisalFrame) return false;
     const record = get<Pokemon>("pokemon", item.pokemonId);
@@ -146,7 +139,7 @@ export async function reviewUnknownSpecialStates(
   const finished = await processPreparedInOrder({
     items: candidates,
     needsPreparation: () => true,
-    active,
+    active: () => get<Scan>("scans", scanId)?.status === "running",
     prepare: async (item, signal) => {
       try {
         return await reviewSpecialVisual(
@@ -184,26 +177,15 @@ export async function reviewUnknownSpecialStates(
   applyStoredNormalShadowReviews(scanId);
   updateScan(scanId, { review: pendingReviewCount(scanId) });
   reevaluate();
-  if (allowCompleted && get<Scan>("scans", scanId)?.status === "completed")
-    updateScan(scanId, { stage: "截圖與解析完成，請檢查放生候選" });
   return finished;
 }
 
 /** Use two already saved moments and exact variant references; never touch the phone. */
-export async function reviewUnknownShiny(
-  scanId: string,
-  allowCompleted = false,
-  retryUncertain = false,
-) {
-  const active = () => {
-    const status = get<Scan>("scans", scanId)?.status;
-    return status === "running" || (allowCompleted && status === "completed");
-  };
+export async function reviewUnknownShiny(scanId: string) {
   const snapshot = getSnapshot();
   if (!snapshot) return true;
   const candidates = scanItems(scanId).filter((item) => {
-    if ((item.shinyReview && !(retryUncertain && item.shinyReview.verdict === "uncertain")) ||
-        !item.pokemonId || !item.appraisalFrame) return false;
+    if (item.shinyReview || !item.pokemonId || !item.appraisalFrame) return false;
     const record = get<Pokemon>("pokemon", item.pokemonId);
     const fields = record?.fields;
     return Boolean(
@@ -221,7 +203,7 @@ export async function reviewUnknownShiny(
   const finished = await processPreparedInOrder({
     items: candidates,
     needsPreparation: () => true,
-    active,
+    active: () => get<Scan>("scans", scanId)?.status === "running",
     prepare: async (item, signal) => {
       const record = get<Pokemon>("pokemon", item.pokemonId!);
       const species = record?.fields.speciesId && snapshot.species[record.fields.speciesId];
@@ -259,15 +241,11 @@ export async function reviewUnknownShiny(
       const latest = get<ScanItem>("scan_items", item.id);
       if (latest) put("scan_items", item.id, { ...latest, shinyReview: proof });
     },
-    concurrency: allowCompleted
-      ? Math.min(2, getRuntimeConfig().shinyReviewConcurrency)
-      : getRuntimeConfig().shinyReviewConcurrency,
+    concurrency: getRuntimeConfig().shinyReviewConcurrency,
   });
   applyStoredShinyReviews(scanId);
   applyStoredNormalShadowReviews(scanId);
   updateScan(scanId, { review: pendingReviewCount(scanId) });
   reevaluate();
-  if (allowCompleted && get<Scan>("scans", scanId)?.status === "completed")
-    updateScan(scanId, { stage: "截圖與解析完成，請檢查放生候選" });
   return finished;
 }

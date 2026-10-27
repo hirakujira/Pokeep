@@ -9,9 +9,7 @@
     "start": "node scripts/local-server.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "data:update": "node --import tsx scripts/update-data.ts",
-    "evolution:recheck": "node --import tsx scripts/recheck-evolution.ts",
-    "max:recheck": "node --import tsx scripts/recheck-max-status.ts"
+    "data:update": "node --import tsx scripts/update-data.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

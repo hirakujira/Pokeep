@@ -94,4 +94,4 @@ npm run typecheck
 npm run build
 ```
 
-測試使用模擬的 iPhone Use 與 AI 回應，不消耗 API 額度。舊手機截圖可用 `npm run max:recheck` 在本機回填極巨化狀態。本機 API 的寫入請求須同源，並帶 `x-pogo-local: 1` 標頭。
+測試使用模擬的 iPhone Use 與 AI 回應，不消耗 API 額度。本機 API 的寫入請求須同源，並帶 `x-pogo-local: 1` 標頭。
