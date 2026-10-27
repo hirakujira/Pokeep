@@ -117,20 +117,37 @@ export function restrictedChoice<T>(all: T[], allowed: T[] | undefined, current:
   return { options: [null, ...values, ...conflict], value: current, fixed: false };
 }
 
-/** Gender and shadow values the species allows; undefined while the species is unknown. */
+export type ShadowState = "none" | "shadow" | "purified";
+export const shadowStates: ShadowState[] = ["none", "shadow", "purified"];
+
+/** The shadow and purified fields as one state; null while it is not confirmed. */
+export function shadowState(f: Pick<Fields, "shadow" | "purified">): ShadowState | null {
+  if (f.shadow === true) return "shadow";
+  if (f.purified === true) return "purified";
+  return f.shadow === false && f.purified === false ? "none" : null;
+}
+
+export function shadowFields(state: ShadowState | null): Pick<Fields, "shadow" | "purified"> {
+  if (state === null) return { shadow: null, purified: null };
+  return { shadow: state === "shadow", purified: state === "purified" };
+}
+
+/** Gender and shadow states the species allows; undefined while the species is unknown. */
 export function speciesLimits(speciesId: string | null, species: Map<string, CatalogSpecies>) {
   const s = speciesId ? species.get(speciesId) : undefined;
   if (!s) return { gender: undefined, shadow: undefined };
   const hasShadow = species.has(`${s.id.replace(/_shadow$/, "")}_shadow`);
-  return { gender: s.genders, shadow: hasShadow ? [true, false] : [false] };
+  return { gender: s.genders, shadow: hasShadow ? shadowStates : ["none" as const] };
 }
 
 /** Fields with the values the species fixes filled in, so saving stores what the drawer shows. */
 export function withFixedValues(f: Fields, species: Map<string, CatalogSpecies>): Fields {
   const limits = speciesLimits(f.speciesId, species);
+  const state = restrictedChoice(shadowStates, limits.shadow, shadowState(f)).value;
   return {
     ...f,
     gender: restrictedChoice(allGenders, limits.gender, f.gender).value,
-    shadow: restrictedChoice([true, false], limits.shadow, f.shadow).value,
+    // An unconfirmed state keeps what was stored, e.g. shadow: false with purified unknown.
+    ...(state === null ? {} : shadowFields(state)),
   };
 }

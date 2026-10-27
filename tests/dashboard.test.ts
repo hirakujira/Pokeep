@@ -200,8 +200,9 @@ test("個體詳情列出各用途的學習器步驟與先進化提示", () => {
   assert.ok(html.includes("培養目標是進化後的 巴大蝶"));
 });
 
-const { dexEntries, formChoice, speciesWithShadow, restrictedChoice, withFixedValues } =
-  await import("../src/components/dashboard/species-options");
+const {
+  dexEntries, formChoice, speciesWithShadow, restrictedChoice, withFixedValues, shadowState, shadowFields,
+} = await import("../src/components/dashboard/species-options");
 const { PokemonDrawer } = await import("../src/components/dashboard/pokemon-drawer");
 const catalogSpecies = (rows: [string, number, string, string | null][]) =>
   rows.map(([id, dex, name, form]) => ({ id, dex, name, types: ["normal"], form }));
@@ -290,7 +291,7 @@ test("詳細資料面板以圖鑑編號與形態兩個選單顯示目前物種",
   assert.doesNotMatch(html, /暗影）<\/option>/);
 });
 
-test("性別與暗影依物種限制選項，只剩一個值時固定並停用", () => {
+test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單", () => {
   const catalog = {
     ...formCatalog,
     species: [
@@ -303,19 +304,28 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用",
   const byId = new Map(catalog.species.map((s) => [s.id, s]));
   const fixed = (speciesId: string, patch: Partial<Fields> = {}) => {
     const f = withFixedValues({ ...emptyFields(), speciesId, ...patch }, byId);
-    return [f.gender, f.shadow];
+    return [f.gender, f.shadow, f.purified];
   };
-  assert.deepEqual(fixed("tauros"), ["male", false]);
-  assert.deepEqual(fixed("magnemite"), ["genderless", null]);
-  assert.deepEqual(fixed("pidgey"), [null, false]);
-  assert.deepEqual(fixed("tauros", { gender: "female", shadow: true }), ["female", true]);
+  assert.deepEqual(fixed("tauros"), ["male", false, false]);
+  assert.deepEqual(fixed("magnemite"), ["genderless", null, null]);
+  assert.deepEqual(fixed("magnemite", { shadow: false }), ["genderless", false, null]);
+  assert.deepEqual(fixed("magnemite", { shadow: true }), ["genderless", true, false]);
+  assert.deepEqual(fixed("pidgey"), [null, false, false]);
+  assert.deepEqual(fixed("tauros", { gender: "female", shadow: true }), ["female", true, false]);
+  assert.deepEqual(
+    [[null, null], [false, null], [false, false], [true, false], [false, true]]
+      .map(([shadow, purified]) => shadowState({ shadow, purified })),
+    [null, null, "none", "shadow", "purified"],
+  );
+  assert.deepEqual(shadowFields("purified"), { shadow: false, purified: true });
+  assert.deepEqual(shadowFields(null), { shadow: null, purified: null });
   assert.deepEqual(restrictedChoice(["male", "female"], ["male"], "female"),
     { options: [null, "male", "female"], value: "female", fixed: false });
   assert.deepEqual(restrictedChoice(["male", "female", "genderless"], undefined, null).options,
     [null, "male", "female", "genderless"]);
 
-  const render = (speciesId: string) => renderToString(React.createElement(PokemonDrawer, {
-    pokemon: record(speciesId, { speciesId, gender: null, shadow: null }),
+  const render = (speciesId: string, patch: Partial<Fields> = {}) => renderToString(React.createElement(PokemonDrawer, {
+    pokemon: record(speciesId, { speciesId, gender: null, shadow: null, purified: null, ...patch }),
     records: [],
     catalog,
     error: "",
@@ -330,11 +340,16 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用",
   assert.match(select(tauros, "性別"), /^<select disabled="">/);
   assert.equal(select(tauros, "性別").match(/<option/g)?.length, 1);
   assert.match(select(tauros, "性別"), /雄性/);
-  assert.match(select(tauros, "暗影"), /^<select disabled=""><option value="false" selected="">否<\/option><\/select>$/);
+  assert.match(select(tauros, "暗影"), /^<select disabled=""><option value="none" selected="">無暗影形態<\/option><\/select>$/);
+  assert.doesNotMatch(tauros, /<span>淨化</);
   const pidgey = select(render("pidgey"), "性別");
   assert.doesNotMatch(pidgey, /disabled|無性別/);
   assert.match(pidgey, /雌性/);
   const magnemite = render("magnemite");
   assert.match(select(magnemite, "性別"), /^<select disabled=""><option value="genderless" selected="">無性別<\/option><\/select>$/);
   assert.doesNotMatch(select(magnemite, "暗影"), /disabled/);
+  assert.deepEqual([...select(magnemite, "暗影").matchAll(/>([^<>]+)<\/option>/g)].map((m) => m[1]),
+    ["未確認", "無暗影形態", "暗影", "暗影 - 已淨化"]);
+  assert.match(select(render("magnemite", { shadow: false, purified: true }), "暗影"),
+    /<option value="purified" selected="">暗影 - 已淨化<\/option>/);
 });

@@ -27,23 +27,32 @@ import {
   formChoice,
   keptFormKey,
   restrictedChoice,
+  shadowFields,
+  shadowState,
+  shadowStates,
   speciesLimits,
   speciesWithShadow,
   unknownForm,
   withFixedValues,
   type FormOption,
+  type ShadowState,
 } from "./species-options";
 import type { Catalog } from "./types";
 import { Status } from "./ui";
 
-const choiceLabels: Record<string, string> = {
+const genderLabels: Record<string, string> = {
   "": "未知",
-  true: "是",
-  false: "否",
   male: "雄性",
   female: "雌性",
   genderless: "無性別",
 };
+const shadowLabels: Record<string, string> = {
+  "": "未確認",
+  none: "無暗影形態",
+  shadow: "暗影",
+  purified: "暗影 - 已淨化",
+};
+const shadowKeys: (keyof Fields)[] = ["shadow", "purified"];
 
 export function PokemonDrawer({
   pokemon: p,
@@ -140,23 +149,22 @@ export function PokemonDrawer({
     setFields((f) => ({ ...f, [key]: value }));
     setVerified(false);
   };
-  const sourceFor = (key: keyof Fields) =>
-    p.sources.filter((s) => s.fields.includes(key));
-  const heading = (key: keyof Fields) => (
+  // keys lists every field one editor covers; the shadow editor also sets purified.
+  const overridden = (keys: (keyof Fields)[]) => keys.some((k) => Object.hasOwn(p.overrides, k));
+  const heading = (key: keyof Fields, keys = [key]) => (
     <span>
       {fieldLabels[key]}
-      {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
+      {overridden(keys) && <small>已修正</small>}
     </span>
   );
-  const note = (key: keyof Fields) => (
-    <small>
-      {sourceFor(key).length
-        ? `${sourceFor(key).length} 張畫面可核對`
-        : Object.hasOwn(p.overrides, key)
-          ? "人工補充"
-          : "來源未顯示"}
-    </small>
-  );
+  const note = (key: keyof Fields, keys = [key]) => {
+    const sources = p.sources.filter((s) => keys.some((k) => s.fields.includes(k))).length;
+    return (
+      <small>
+        {sources ? `${sources} 張畫面可核對` : overridden(keys) ? "人工補充" : "來源未顯示"}
+      </small>
+    );
+  };
   const entry = (() => {
     const dex = catalog.species.find((s) => s.id === fields.speciesId)?.dex ?? dexChoice;
     return dex === null
@@ -185,7 +193,7 @@ export function PokemonDrawer({
     applyForm(option);
   };
   const editor = (key: keyof Fields) => {
-    const bool = ["shadow", "purified", "shiny", "favorite"].includes(key),
+    const bool = ["shiny", "favorite"].includes(key),
       text = ["name", "costume"].includes(key),
       moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key);
     if (key === "speciesId") {
@@ -244,34 +252,37 @@ export function PokemonDrawer({
     }
     if (key === "gender" || key === "shadow") {
       const limits = speciesLimits(fields.speciesId, speciesById);
-      const choice: { options: (string | boolean | null)[]; value: string | boolean | null; fixed: boolean } =
+      const choice: { options: (string | null)[]; value: string | null; fixed: boolean } =
         key === "gender"
           ? restrictedChoice(allGenders, limits.gender, fields.gender)
-          : restrictedChoice([true, false], limits.shadow, fields.shadow);
+          : restrictedChoice(shadowStates, limits.shadow, shadowState(fields));
+      const labels = key === "gender" ? genderLabels : shadowLabels,
+        keys = key === "gender" ? [key] : shadowKeys;
       return (
         <label className="edit-field" key={key}>
-          {heading(key)}
+          {heading(key, keys)}
           <select
-            value={String(choice.value ?? "")}
+            value={choice.value ?? ""}
             disabled={choice.fixed}
             onChange={(e) => {
-              if (key === "gender") return set(key, (e.target.value || null) as Fields["gender"]);
-              const value = e.target.value === "" ? null : e.target.value === "true";
+              const value = e.target.value || null;
+              if (key === "gender") return set(key, value as Fields["gender"]);
+              const next = shadowFields(value as ShadowState | null);
               setFields((f) => ({
                 ...f,
-                shadow: value,
-                speciesId: f.speciesId && speciesWithShadow(f.speciesId, value, speciesById),
+                ...next,
+                speciesId: f.speciesId && speciesWithShadow(f.speciesId, next.shadow, speciesById),
               }));
               setVerified(false);
             }}
           >
             {choice.options.map((option) => (
-              <option key={String(option)} value={String(option ?? "")}>
-                {choiceLabels[String(option ?? "")]}
+              <option key={option ?? ""} value={option ?? ""}>
+                {labels[option ?? ""]}
               </option>
             ))}
           </select>
-          {note(key)}
+          {note(key, keys)}
         </label>
       );
     }
@@ -484,7 +495,6 @@ export function PokemonDrawer({
                   {(
                     [
                       "shadow",
-                      "purified",
                       "shiny",
                       "costume",
                       "favorite",
