@@ -11,7 +11,12 @@ export async function api<T = unknown>(
     },
     body: data ? JSON.stringify(data) : undefined,
   });
-  const result = await r.json();
-  if (!r.ok) throw new Error(result.error || "操作失敗");
+  let result;
+  try {
+    result = await r.json();
+  } catch {
+    throw new Error(r.ok ? "伺服器回應格式不正確" : `操作失敗（HTTP ${r.status}）`);
+  }
+  if (!r.ok) throw new Error(result?.error || "操作失敗");
   return result;
 }
