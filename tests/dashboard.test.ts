@@ -128,7 +128,7 @@ const trainingAdvice = (patch: Partial<MoveTrainingAdvice>): MoveTrainingAdvice 
   ...patch,
 });
 
-test("招式學習器總覽依每顆學習器的期望提升排序，厲害學習器沒對象時列出可直接指定的招式", () => {
+test("招式學習器總覽依每顆學習器的價值排序，厲害學習器沒對象時列出可直接指定的招式", () => {
   const withAdvice = (id: string, moveTraining: MoveTrainingAdvice[], category: Analysis["category"] = "invest") =>
     record(id, {}, { analysis: analysisWith({ category, moveTraining }) });
   const records = [
@@ -143,6 +143,13 @@ test("招式學習器總覽依每顆學習器的期望提升排序，厲害學�
       purpose: "pvp", label: "超級聯盟 環境 #5", rank: 5, name: "聯盟成員",
       steps: [trainingStep({ tm: "charged", from: "STRUGGLE", to: "X_SCISSOR", odds: 4 })],
     })]),
+    // PvP #28 for sure scores 28; #25 at 1/3 odds scores 75, so the sure one leads.
+    withAdvice("pvp-sure", [trainingAdvice({
+      purpose: "pvp", label: "大師聯盟 環境 #28", rank: 28, name: "穩定聯盟", steps: [trainingStep({ odds: 1 })],
+    })]),
+    withAdvice("pvp-rare", [trainingAdvice({
+      purpose: "pvp", label: "大師聯盟 環境 #25", rank: 25, name: "難抽聯盟", steps: [trainingStep({ odds: 3 })],
+    })]),
     withAdvice("evolve", [trainingAdvice({ status: "evolveFirst", name: "進化目標" })]),
     withAdvice("unverified", [trainingAdvice({
       name: "未核對個體", steps: [trainingStep({ odds: 1 })],
@@ -156,6 +163,7 @@ test("招式學習器總覽依每顆學習器的期望提升排序，厲害學�
   for (const label of ["招式學習器（一般）", "招式學習器（特殊）", "厲害招式學習器（一般）", "厲害招式學習器（特殊）"])
     assert.ok(html.includes(label), label);
   assert.ok(html.indexOf("穩定提升") < html.indexOf("大幅提升"));
+  assert.ok(html.indexOf("穩定聯盟") < html.indexOf("難抽聯盟"));
   assert.ok(html.includes('aria-expanded="true"'));
   assert.equal(html.split('role="tabpanel"').length - 1, 4);
   assert.equal(html.split('aria-selected="true"').length - 1, 1);

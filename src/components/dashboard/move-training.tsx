@@ -42,8 +42,8 @@ function dpsLabel(dps: MoveTrainingAdvice["dps"]) {
   const gain = Math.round(((dps.best - dps.current) / dps.current) * 100);
   return `${dps.current.toFixed(2)} → ${dps.best.toFixed(2)}（${gain >= 0 ? "+" : ""}${gain}%）`;
 }
-// One ordinary TM hits the target with probability 1/odds, so raid uses are
-// ranked by the expected DPS gain per TM rather than by the gain alone.
+// Each ordinary TM roll hits the target with probability 1/odds, so odds is
+// also the expected number of TMs spent; both orders rank value per TM.
 const expectedGain = ({ advice, step }: Entry) =>
   advice.dps
     ? (advice.dps.best - advice.dps.current) / advice.dps.current / step.odds
@@ -56,8 +56,8 @@ function raidOrder(a: Entry, b: Entry) {
 }
 function pvpOrder(a: Entry, b: Entry) {
   return Number(a.step.blocked) - Number(b.step.blocked) ||
-    a.advice.rank - b.advice.rank ||
-    a.step.odds - b.step.odds;
+    a.advice.rank * a.step.odds - b.advice.rank * b.step.odds ||
+    a.advice.rank - b.advice.rank;
 }
 
 function TmRow({
@@ -343,7 +343,7 @@ export function MoveTrainingPanel({
             />
           ))}
           <p className="caption tm-footnote">
-            團體戰依每顆學習器的期望 DPS 提升排序（提升幅度 ÷ 可能抽到的招式數）；PvP 依 PvPoke 環境排名排序。一般學習器隨機抽招，成功率依目前招式池估算；社群日與活動限定招式仍須在遊戲核對。
+            團體戰依「DPS 提升幅度 ÷ 平均需要幾顆學習器」排序，越大越前面；PvP 依「PvPoke 環境排名 × 平均需要幾顆學習器」排序，越小越前面。一般學習器隨機抽招，成功率依目前招式池估算；社群日與活動限定招式仍須在遊戲核對。
             {evolveFirst
               ? `另有 ${evolveFirst} 隻的培養目標是進化型；進化會重新抽招式，先進化再決定學習器。`
               : ""}
