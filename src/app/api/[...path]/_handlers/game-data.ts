@@ -12,7 +12,9 @@ export function speciesCatalog() {
       dex: s.dex,
       name: s.name,
       types: s.types,
+      form: s.form,
     })),
+    visualForms: snapshot?.visualForms ?? {},
     moves: Object.values(snapshot?.moves || {}).map((m) => ({
       id: m.id,
       name: moveName(m.id, snapshot?.moveNames),

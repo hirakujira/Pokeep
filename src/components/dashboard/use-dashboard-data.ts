@@ -6,7 +6,7 @@ import type { Catalog, PhoneState, State } from "./types";
 
 export function useDashboardData(setError: (message: string) => void) {
   const [state, setState] = useState<State>(empty),
-    [catalog, setCatalog] = useState<Catalog>({ species: [], moves: [] });
+    [catalog, setCatalog] = useState<Catalog>({ species: [], moves: [], visualForms: {} });
   const [loading, setLoading] = useState(true);
   const [phoneState, setPhoneState] = useState<PhoneState | null>(null);
   const stateLoader = useMemo(() => trackPending(async () => {

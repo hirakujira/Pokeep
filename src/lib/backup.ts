@@ -257,6 +257,9 @@ const snapshotSchema = z.object({
   }),
   names: z.record(z.string(), z.string()),
   moveNames: z.record(z.string(), z.string()),
+  visualForms: z
+    .record(z.string(), z.array(z.object({ id: z.string(), label: z.string() })))
+    .optional(),
   warnings: z.array(z.string()),
 });
 const backupSchema = z.object({

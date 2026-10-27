@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -21,6 +21,14 @@ import {
   sourceTime,
   speciesLabel,
 } from "./format";
+import {
+  dexEntries,
+  formChoice,
+  keptFormKey,
+  speciesWithShadow,
+  unknownForm,
+  type FormOption,
+} from "./species-options";
 import type { Catalog } from "./types";
 import { Status } from "./ui";
 
@@ -46,6 +54,7 @@ export function PokemonDrawer({
   const [section, setSection] = useState("review"),
     [fields, setFields] = useState<Fields>(effective(p)),
     [speciesQuery, setSpeciesQuery] = useState(""),
+    [dexChoice, setDexChoice] = useState<number | null>(null),
     [source, setSource] = useState(0),
     [verified, setVerified] = useState(p.verified),
     [evolutionSilhouette, setEvolutionSilhouette] = useState<boolean | "unavailable" | "unknown-branch" | null>(
@@ -63,6 +72,7 @@ export function PokemonDrawer({
   useEffect(() => {
     setFields(effective(p));
     setSpeciesQuery("");
+    setDexChoice(null);
     setVerified(p.verified);
     setEvolutionSilhouette(p.evolutionSilhouette ?? null);
     setMaxStatus(p.maxStatus ?? null);
@@ -104,6 +114,8 @@ export function PokemonDrawer({
   const a = p.analysis,
     activeSource = p.sources[Math.min(source, p.sources.length - 1)],
     moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
+  const entries = useMemo(() => dexEntries(catalog.species, catalog.visualForms), [catalog]),
+    speciesIds = useMemo(() => new Set(catalog.species.map((s) => s.id)), [catalog]);
   const reviewPrompts = reviewPromptsFor(p);
   const changes = Object.fromEntries(
     (Object.keys(fields) as (keyof Fields)[])
@@ -116,72 +128,122 @@ export function PokemonDrawer({
   };
   const sourceFor = (key: keyof Fields) =>
     p.sources.filter((s) => s.fields.includes(key));
+  const heading = (key: keyof Fields) => (
+    <span>
+      {fieldLabels[key]}
+      {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
+    </span>
+  );
+  const note = (key: keyof Fields) => (
+    <small>
+      {sourceFor(key).length
+        ? `${sourceFor(key).length} 張畫面可核對`
+        : Object.hasOwn(p.overrides, key)
+          ? "人工補充"
+          : "來源未顯示"}
+    </small>
+  );
+  const entry = (() => {
+    const dex = catalog.species.find((s) => s.id === fields.speciesId)?.dex ?? dexChoice;
+    return dex === null
+      ? entries.find((e) => e.name === fields.name)
+      : entries.find((e) => e.dex === dex);
+  })();
+  const applyForm = (option: FormOption) => {
+    setFields((f) => ({
+      ...f,
+      speciesId: option.speciesId && speciesWithShadow(option.speciesId, f.shadow, speciesIds),
+      form: option.form,
+    }));
+    setVerified(false);
+  };
+  const chooseDex = (dex: number | null) => {
+    const next = entries.find((e) => e.dex === dex);
+    setDexChoice(next?.dex ?? null);
+    if (!next) {
+      set("speciesId", null);
+      return;
+    }
+    const kept = formChoice(next, null, fields.form).selected;
+    // Unrecognised form text described the previous Pokémon, not this one.
+    const option = kept.key === keptFormKey ? { ...kept, form: null } : kept;
+    setFields((f) => ({ ...f, name: f.name || next.name }));
+    applyForm(option);
+  };
   const editor = (key: keyof Fields) => {
     const bool = ["shadow", "purified", "shiny", "favorite"].includes(key),
-      text = ["name", "form", "costume"].includes(key),
+      text = ["name", "costume"].includes(key),
       moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key);
     if (key === "speciesId") {
       const query = speciesQuery.trim().replace(/^#/, "").toLocaleLowerCase();
-      const matches = catalog.species.filter((s) =>
-        !query || String(s.dex).includes(query) ||
-        s.name.toLocaleLowerCase().includes(query) ||
-        localizeSpeciesName(s.name, s.id).toLocaleLowerCase().includes(query) ||
-        s.id.toLocaleLowerCase().includes(query));
-      const options = fields.speciesId && !matches.some((s) => s.id === fields.speciesId)
-        ? [...catalog.species.filter((s) => s.id === fields.speciesId), ...matches]
-        : matches;
+      const matches = entries.filter((e) =>
+        !query || String(e.dex).includes(query) ||
+        e.name.toLocaleLowerCase().includes(query) ||
+        e.options.some((o) =>
+          o.label.toLocaleLowerCase().includes(query) || o.matches.some((m) => m.includes(query))));
+      const options = entry && !matches.includes(entry) ? [entry, ...matches] : matches;
       return (
         <div className="edit-field" key={key}>
-          <span>
-            {fieldLabels[key]}
-            {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
-          </span>
+          {heading(key)}
           <input
-            aria-label="搜尋物種"
+            aria-label="搜尋寶可夢"
             value={speciesQuery}
-            placeholder="搜尋中文名稱、圖鑑編號或英文 ID"
+            placeholder="搜尋中文名稱、圖鑑編號、形態或英文 ID"
             onChange={(e) => setSpeciesQuery(e.target.value)}
           />
           <select
-            aria-label="物種／形態"
-            value={fields.speciesId || ""}
-            onChange={(e) => {
-              const s = catalog.species.find((row) => row.id === e.target.value);
-              setFields((f) => ({
-                ...f,
-                speciesId: e.target.value || null,
-                ...(s ? {
-                  shadow: s.id.endsWith("_shadow"),
-                  name: f.name || s.name.split(" ")[0],
-                } : {}),
-              }));
-              setVerified(false);
-            }}
+            aria-label="全國圖鑑"
+            value={entry?.dex ?? ""}
+            onChange={(e) => chooseDex(Number(e.target.value) || null)}
           >
-            <option value="">選擇物種／形態</option>
-            {options.map((s) => (
-              <option key={s.id} value={s.id}>
-                #{s.dex} {localizeSpeciesName(s.name, s.id)}
-              </option>
+            <option value="">選擇寶可夢</option>
+            {options.map((e) => (
+              <option key={e.dex} value={e.dex}>{`#${e.dex} ${e.name}`}</option>
             ))}
           </select>
-          <small>{query ? `找到 ${matches.length} 種物種／形態` :
-            `${catalog.species.length} 種物種／形態`}</small>
+          <small>{query ? `找到 ${matches.length} 種寶可夢` : `${entries.length} 種寶可夢`}</small>
         </div>
+      );
+    }
+    if (key === "form") {
+      const choice = entry && formChoice(entry, fields.speciesId, fields.form);
+      return (
+        <label className="edit-field" key={key}>
+          {heading(key)}
+          <select
+            value={choice?.selected.key ?? ""}
+            disabled={!choice || choice.options.length < 2}
+            onChange={(e) => {
+              const option = choice?.options.find((o) => o.key === e.target.value);
+              if (option) applyForm(option);
+            }}
+          >
+            {choice
+              ? choice.options.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))
+              : <option value="">{unknownForm}</option>}
+          </select>
+          {note(key)}
+        </label>
       );
     }
     return (
       <label className="edit-field" key={key}>
-        <span>
-          {fieldLabels[key]}
-          {Object.hasOwn(p.overrides, key) && <small>已修正</small>}
-        </span>
+        {heading(key)}
         {bool ? (
           <select
             value={fields[key] === null ? "" : String(fields[key])}
-            onChange={(e) =>
-              set(key, e.target.value === "" ? null : e.target.value === "true")
-            }
+            onChange={(e) => {
+              const value = e.target.value === "" ? null : e.target.value === "true";
+              if (key !== "shadow") return set(key, value);
+              setFields((f) => ({
+                ...f,
+                shadow: value,
+                speciesId: f.speciesId && speciesWithShadow(f.speciesId, value, speciesIds),
+              }));
+              setVerified(false);
+            }}
           >
             <option value="">未知</option>
             <option value="true">是</option>
@@ -228,13 +290,7 @@ export function PokemonDrawer({
             }
           />
         )}
-        <small>
-          {sourceFor(key).length
-            ? `${sourceFor(key).length} 張畫面可核對`
-            : Object.hasOwn(p.overrides, key)
-              ? "人工補充"
-              : "來源未顯示"}
-        </small>
+        {note(key)}
       </label>
     );
   };

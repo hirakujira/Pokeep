@@ -81,7 +81,7 @@ function applyEdit(record: Pokemon, input: z.infer<typeof editInput>) {
       getSnapshot()?.species[merged.speciesId]?.tags.includes("shadow"),
     ) !== merged.shadow
   )
-    throw new Error("暗影狀態與所選物種不一致，請選擇對應的一般／暗影形態。");
+    throw new Error("暗影狀態與所選物種不一致，請確認暗影欄位；部分物種沒有暗影資料。");
   if (input.dismissCandidates || input.owned === false) {
     const peers = next.candidates;
     next.candidates = [];

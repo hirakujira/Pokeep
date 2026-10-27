@@ -1262,3 +1262,53 @@ test("物種目錄包含脫殼忍者與已知形態，仍排除一般未開放�
   assert.equal(normalized.species.nidoran_m.dex, 32);
   assert.equal(normalized.species.squawkabilly_green.name, "怒鸚哥（綠羽）");
 });
+
+test("遊戲資料收集外觀形態，略過服裝、戰鬥中形態與已有物種 ID 的形態", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [],
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("tauros", 128), base("tauros_combat", 128), base("unown", 201), base("raikou", 243),
+    base("shellos", 422), base("rockruff", 744), base("mimikyu", 778),
+  ];
+  const forms = (dex: number, name: string, rows: Record<string, unknown>[]) => ({
+    templateId: `FORMS_V${String(dex).padStart(4, "0")}_POKEMON_${name}`,
+    data: { formSettings: { pokemon: name, forms: rows } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    forms(128, "TAUROS", [{ form: "TAUROS_NORMAL" }, { form: "TAUROS_PALDEA_COMBAT" }]),
+    forms(201, "UNOWN", [
+      { form: "UNOWN_F", assetBundleValue: 16 }, { form: "UNOWN_A", assetBundleValue: 11 },
+      { form: "UNOWN_S", assetBundleValue: 29 }, { form: "UNOWN_HAT", isCostume: true },
+    ]),
+    forms(243, "RAIKOU", [{ form: "RAIKOU_NORMAL" }, { form: "RAIKOU_S" }]),
+    forms(422, "SHELLOS", [
+      { form: "SHELLOS_EAST_SEA", assetBundleValue: 12 },
+      { form: "SHELLOS_WEST_SEA", assetBundleValue: 11 },
+    ]),
+    forms(744, "ROCKRUFF", [{ form: "ROCKRUFF_NORMAL" }, { form: "ROCKRUFF_DUSK" }]),
+    forms(778, "MIMIKYU", [{ form: "MIMIKYU_DISGUISED" }, { form: "MIMIKYU_BUSTED" }]),
+  ];
+  const texts = [
+    ["form_east_sea", "東海"], ["form_west_sea", "西海"], ["form_dusk", "黃昏的樣子"],
+    ["form_disguised", "Disguised Form"],
+  ].map(([id, text]) => `RESOURCE ID: ${id}\nTEXT: ${text}`).join("\n");
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { visualForms } = normalizeData({ pokemon, moves: [] }, gm, texts, ranks, "test-version");
+  assert.deepEqual(visualForms, {
+    201: [{ id: "a", label: "A" }, { id: "f", label: "F" }, { id: "s", label: "S" }],
+    422: [{ id: "west_sea", label: "西海" }, { id: "east_sea", label: "東海" }],
+    744: [{ id: "normal", label: "一般" }, { id: "dusk", label: "黃昏的樣子" }],
+  });
+});

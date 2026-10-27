@@ -251,6 +251,8 @@ export type Species = {
   thirdMove: { dust: number; candy: number } | null;
   form: string | null;
 };
+/** An appearance-only form; `label` is the Traditional Chinese text stored in Fields.form. */
+export type VisualForm = { id: string; label: string };
 export type Move = {
   id: string;
   name: string;
@@ -274,6 +276,8 @@ export type Snapshot = {
   powerups: { dust: number[]; candy: number[]; xl: number[] };
   names: Record<string, string>;
   moveNames: Record<string, string>;
+  /** Appearance-only forms by dex; absent in snapshots saved before forms were collected. */
+  visualForms?: Record<string, VisualForm[]>;
   warnings: string[];
 };
 export type Settings = {

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { dataDir, getSnapshot, saveSnapshot } from "./store";
-import type { Fields, Snapshot, Species } from "./types";
+import type { Fields, Snapshot, Species, VisualForm } from "./types";
 import { moveName } from "./move-names";
 
 const urls: Record<string, string> = {
@@ -63,7 +63,97 @@ export function addCatalogForms(species: Snapshot["species"]) {
     };
   }
 }
-export function genderlessByDex(gm: Raw[]) {
+// Labels the Traditional Chinese text file lacks, or files under a generic
+// key that belongs to another species (form_blue is Squawkabilly's plumage).
+const visualFormLabels: Record<string, string> = {
+  EXCLAMATION_POINT: "!",
+  QUESTION_MARK: "?",
+  MINIOR_RED: "紅色核心",
+  MINIOR_ORANGE: "橙色核心",
+  MINIOR_YELLOW: "黃色核心",
+  MINIOR_GREEN: "綠色核心",
+  MINIOR_BLUE: "淺藍色核心",
+  MINIOR_INDIGO: "藍色核心",
+  MINIOR_VIOLET: "紫色核心",
+  MAGEARNA_ORIGINAL_COLOR: "500年前的顏色",
+  POLTCHAGEIST_COUNTERFEIT: "冒牌貨的樣子",
+  POLTCHAGEIST_ARTISAN: "高檔貨的樣子",
+  SINISTCHA_UNREMARKABLE: "凡作的樣子",
+  SINISTCHA_MASTERPIECE: "傑作的樣子",
+  TOXTRICITY_AMPED: "高調的樣子",
+  TOXTRICITY_LOW_KEY: "低調的樣子",
+};
+// In-battle form changes; a caught Pokémon never keeps them.
+const battleOnlyForms = new Set([
+  "AEGISLASH_BLADE", "MELOETTA_PIROUETTE", "MIMIKYU_BUSTED", "CRAMORANT_GULPING",
+  "CRAMORANT_GORGING", "MORPEKO_HANGRY", "ETERNATUS_ETERNAMAX",
+]);
+// Pre-evolutions share their evolution's pattern names.
+const visualFormTextOwner: Record<string, string> = {
+  SCATTERBUG: "VIVILLON",
+  SPEWPA: "VIVILLON",
+};
+function visualFormLabel(pokemon: string, suffix: string, tr: Record<string, string>) {
+  const text = (key: string) => {
+    const value = tr[`form_${key.toLowerCase()}`]?.trim();
+    return value && /[^\x00-\x7F]/.test(value) ? value : undefined;
+  };
+  return visualFormLabels[`${pokemon}_${suffix}`] ?? visualFormLabels[suffix] ??
+    text(`${pokemon}_${suffix}`) ??
+    (visualFormTextOwner[pokemon] && text(`${visualFormTextOwner[pokemon]}_${suffix}`)) ??
+    text(suffix) ??
+    (/^\d+$/.test(suffix) ? `花紋 ${Number(suffix) + 1}` : suffix);
+}
+/**
+ * Appearance-only forms (Shellos seas, Unown letters, Vivillon patterns…) share
+ * one battle species, so PvPoke has no IDs for them. Species with several
+ * catalog IDs already list their forms through those IDs.
+ */
+export function visualFormsByDex(
+  gm: Raw[],
+  tr: Record<string, string>,
+  species: Snapshot["species"],
+) {
+  const variants = new Map<number, number>();
+  for (const s of Object.values(species))
+    if (!s.id.endsWith("_shadow")) variants.set(s.dex, (variants.get(s.dex) ?? 0) + 1);
+  const result: Record<string, VisualForm[]> = {};
+  for (const row of gm) {
+    const settings = row.data?.formSettings,
+      dex = Number(row.templateId?.match(/^FORMS_V(\d+)_POKEMON_/)?.[1]);
+    if (!Array.isArray(settings?.forms) || variants.get(dex) !== 1) continue;
+    const pokemon: string = settings.pokemon;
+    let normal = false;
+    const forms: (VisualForm & { order: number })[] = [];
+    for (const form of settings.forms) {
+      if (typeof form.form !== "string" || form.isCostume) continue;
+      const suffix = form.form.startsWith(`${pokemon}_`)
+        ? form.form.slice(pokemon.length + 1)
+        : form.form;
+      if (form.form.endsWith("_NORMAL") || suffix === "NORMAL") {
+        normal = true;
+        continue;
+      }
+      // Gender art, event clones, dated event models and the shadow-legend
+      // "_S" models are not forms a player tells apart in the collection.
+      if (suffix === "FEMALE" || suffix === "COPY_2019" || /_\d{4}$/.test(suffix) ||
+          (suffix === "S" && pokemon !== "UNOWN") || battleOnlyForms.has(form.form))
+        continue;
+      forms.push({
+        id: suffix.toLowerCase(),
+        label: visualFormLabel(pokemon, suffix, tr),
+        order: form.assetBundleValue ?? Number.MAX_SAFE_INTEGER,
+      });
+    }
+    if (forms.length + Number(normal) < 2) continue;
+    forms.sort((a, b) => a.order - b.order);
+    result[dex] = [
+      ...(normal ? [{ id: "normal", label: "一般" }] : []),
+      ...forms.map(({ id, label }) => ({ id, label })),
+    ];
+  }
+  return result;
+}export function genderlessByDex(gm: Raw[]) {
   const entries = new Map<number, boolean[]>();
   for (const row of gm) {
     const dex = row.templateId?.match(/^SPAWN_V(\d+)_POKEMON_/);
@@ -261,6 +351,7 @@ export function normalizeData(
     },
     names,
     moveNames,
+    visualForms: visualFormsByDex(gm, tr, species),
     warnings: [
       "PvE 為簡化中性循環 DPS，不是指定頭目的實戰排名。",
       "資料來源 Game Master 可能含未確認欄位；活動開放狀態需核對遊戲。",

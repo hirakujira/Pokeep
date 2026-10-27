@@ -198,3 +198,91 @@ test("個體詳情列出各用途的學習器步驟與先進化提示", () => {
   assert.ok(html.includes("遷怒平時無法用學習器移除"));
   assert.ok(html.includes("培養目標是進化後的 巴大蝶"));
 });
+
+const { dexEntries, formChoice, speciesWithShadow } = await import("../src/components/dashboard/species-options");
+const { PokemonDrawer } = await import("../src/components/dashboard/pokemon-drawer");
+const catalogSpecies = (rows: [string, number, string, string | null][]) =>
+  rows.map(([id, dex, name, form]) => ({ id, dex, name, types: ["normal"], form }));
+const formCatalog = {
+  species: catalogSpecies([
+    ["pidgey", 16, "波波", null],
+    ["rattata", 19, "小拉達", null],
+    ["rattata_shadow", 19, "小拉達（暗影）", null],
+    ["rattata_alolan", 19, "小拉達 (Alolan)", "(Alolan)"],
+    ["rattata_alolan_shadow", 19, "小拉達 (Alolan)（暗影）", "(Alolan)"],
+    ["nidoran_male", 32, "尼多朗", null],
+    ["nidoran_m", 32, "尼多朗", null],
+    ["shellos", 422, "無殼海兔", null],
+    ["giratina_altered", 487, "騎拉帝納 (Altered)", "(Altered)"],
+    ["giratina_origin", 487, "騎拉帝納 (Origin)", "(Origin)"],
+    ["meloetta_aria", 648, "美洛耶塔 (Aria)", "(Aria)"],
+    ["rockruff", 744, "岩狗狗", null],
+    ["squawkabilly", 931, "怒鸚哥", null],
+    ["squawkabilly_blue", 931, "怒鸚哥（藍羽）", "藍羽"],
+  ]),
+  moves: [],
+  visualForms: {
+    422: [{ id: "west_sea", label: "西海" }, { id: "east_sea", label: "東海" }],
+    744: [{ id: "normal", label: "一般" }, { id: "dusk", label: "黃昏的樣子" }],
+  },
+};
+
+test("物種選單每個圖鑑編號一項，形態另列且無法判斷時為待確認", () => {
+  const entries = dexEntries(formCatalog.species, formCatalog.visualForms);
+  const byDex = Object.fromEntries(entries.map((e) => [e.dex, e]));
+  const labels = (dex: number) => byDex[dex].options.map((o) => o.label);
+  assert.deepEqual(entries.map((e) => `${e.dex} ${e.name}`),
+    ["16 波波", "19 小拉達", "32 尼多朗", "422 無殼海兔", "487 騎拉帝納", "648 美洛耶塔", "744 岩狗狗", "931 怒鸚哥"]);
+  assert.deepEqual(labels(16), ["一般"]);
+  assert.deepEqual(labels(32), ["一般"]);
+  assert.deepEqual(labels(648), ["一般"]);
+  assert.deepEqual(labels(19), ["一般", "阿羅拉的樣子"]);
+  assert.deepEqual(labels(487), ["待確認", "別種形態", "起源形態"]);
+  assert.deepEqual(labels(422), ["待確認", "西海", "東海"]);
+  assert.deepEqual(labels(744), ["待確認", "一般", "黃昏的樣子"]);
+  assert.deepEqual(labels(931), ["待確認", "藍羽"]);
+  assert.equal(byDex[487].options[0].speciesId, null);
+  assert.equal(byDex[931].options[0].speciesId, "squawkabilly");
+
+  const pick = (dex: number, id: string | null, form: string | null) =>
+    formChoice(byDex[dex], id, form).selected;
+  assert.equal(pick(19, "rattata_alolan_shadow", null).label, "阿羅拉的樣子");
+  assert.equal(pick(19, "rattata", "阿羅拉").label, "一般");
+  assert.equal(pick(32, "nidoran_m", null).speciesId, "nidoran_male");
+  assert.equal(pick(487, null, null).label, "待確認");
+  assert.equal(pick(422, "shellos", null).label, "待確認");
+  assert.equal(pick(422, "shellos", "east_sea").label, "東海");
+  assert.equal(pick(422, "shellos", "西海").form, "西海");
+  assert.equal(pick(744, "rockruff", null).label, "待確認");
+  assert.equal(pick(744, "rockruff", "normal").label, "一般");
+  assert.equal(pick(648, "meloetta_aria", "歌聲形態").label, "一般");
+
+  const unknownSea = formChoice(byDex[422], "shellos", "普通");
+  assert.equal(unknownSea.selected.label, "待確認（原始辨識「普通」）");
+  assert.equal(unknownSea.options[0], unknownSea.selected);
+  assert.equal(unknownSea.selected.form, "普通");
+  assert.equal(formChoice(byDex[16], "pidgey", "普通").selected.label, "一般（原始辨識「普通」）");
+
+  const ids = new Set(formCatalog.species.map((s) => s.id));
+  assert.equal(speciesWithShadow("rattata_alolan", true, ids), "rattata_alolan_shadow");
+  assert.equal(speciesWithShadow("rattata_shadow", false, ids), "rattata");
+  assert.equal(speciesWithShadow("pidgey", true, ids), "pidgey");
+  assert.equal(speciesWithShadow("rattata_shadow", null, ids), "rattata_shadow");
+});
+
+test("詳細資料面板以圖鑑編號與形態兩個選單顯示目前物種", () => {
+  const html = renderToString(React.createElement(PokemonDrawer, {
+    pokemon: record("sea", { name: "無殼海兔", speciesId: "shellos", form: "east_sea" }),
+    records: [],
+    catalog: formCatalog,
+    error: "",
+    onClose: () => {},
+    onSave: async () => null,
+    onMerge: async () => {},
+    busy: false,
+  }));
+  assert.match(html, /<option value="422" selected="">#422 無殼海兔<\/option>/);
+  assert.match(html, /<option value="east_sea" selected="">東海<\/option>/);
+  assert.match(html, /<option value="">待確認<\/option>/);
+  assert.doesNotMatch(html, /暗影）<\/option>/);
+});
