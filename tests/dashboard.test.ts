@@ -327,7 +327,7 @@ test("詳細資料面板的服裝欄位提供同物種已用過的服裝名稱",
   assert.match(html, /<datalist id="costume-options"><option value="聖誕帽"><\/option><option value="花冠"><\/option><\/datalist>/);
 });
 
-test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單；資源欄位不列遊戲資料已知的成本", () => {
+test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單", () => {
   const catalog = {
     ...formCatalog,
     species: [

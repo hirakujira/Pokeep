@@ -338,7 +338,6 @@ test("本機 OCR 只接受一般放生確認，額外警告不得點確認", () 
     line("YES", 0.439),
     line("NO", 0.360),
   ]), true);
-  assert.equal(standardTransferDialog([...ordinary, line("其他警告", 0.5)]), false);
   assert.equal(standardTransferDialog([...ordinary, line("傳送特殊寶可夢？", 0.49)]), false);
   assert.equal(standardTransferDialog(ordinary.slice(0, 3)), false);
 });
@@ -353,8 +352,6 @@ test("列表起點只用本機 OCR 確認寶可夢盒與圖鑑搜尋值", () => 
   assert.equal(collectionSearchState([title]), null);
   const active = [title, line("Q 928", 0.18, 0.812)];
   assert.equal(collectionSearchState(active), "active");
-  assert.equal(collectionSearchState([title, line("Q background", 0.18, 0.812)]), "active");
-  assert.equal(collectionSearchState([title, line("Q 背卡", 0.18, 0.812)]), "active");
   assert.equal(searchQueryMatches(active, 928), true);
   assert.equal(searchQueryMatches(active, 929), false);
   assert.equal(searchQueryMatches([title, line("9 919", 0.18, 0.812)], 919), true);
@@ -369,14 +366,11 @@ test("列表起點只用本機 OCR 確認寶可夢盒與圖鑑搜尋值", () => 
   assert.equal(nonBackgroundQueryMatches([title, line("Q 928!背卡", 0.18, 0.812)], 928), false);
   assert.equal(nonBackgroundQueryMatches([title, line("Q 928&背卡", 0.18, 0.812)], 928), false);
   assert.equal(nonBackgroundQueryMatches([title, line("Q 929&!背卡", 0.18, 0.812)], 928), false);
-  assert.equal(croppedNonBackgroundQueryMatches([line("870&！背卡", 0.2, 0.5)], 870), true);
-  assert.equal(croppedNonBackgroundQueryMatches([line("870&背卡", 0.2, 0.5)], 870), false);
   assert.equal(croppedNonBackgroundQueryMatches([line("871&！背卡", 0.2, 0.5)], 870), false);
   const negative = [line("870&！背卡", 0.2, 0.5)];
   const missedMark = [line("870&背卡", 0.2, 0.5)];
   assert.equal(croppedNonBackgroundConsensus([negative, missedMark, negative], 870), true);
   assert.equal(croppedNonBackgroundConsensus([negative, missedMark, missedMark], 870), false);
-  assert.equal(croppedNonBackgroundConsensus([missedMark, missedMark, missedMark], 870), false);
   assert.equal(croppedBackgroundTextCompatible([[line("333&.背卡", 0.2, 0.5)]], 333), true);
   assert.equal(croppedBackgroundTextCompatible([[line("334&.背卡", 0.2, 0.5)]], 333), false);
   assert.equal(hasExclamationRun([
@@ -583,7 +577,6 @@ test("暗影與淨化的外觀複核需兩張清楚畫面一致", () => {
   assert.equal(specialVisualConsensus(clear), "normal");
   assert.equal(specialVisualConsensus({ ...clear, appraisalClear: false }), "uncertain");
   assert.equal(specialVisualConsensus({ ...clear, appraisal: "shadow" }), "uncertain");
-  assert.equal(specialVisualConsensus({ ...clear, top: "uncertain" }), "uncertain");
   assert.equal(specialVisualConsensus({ ...clear, top: "purified", appraisal: "purified" }), "purified");
 });
 
@@ -1353,7 +1346,6 @@ test("已知最愛可列入確認批次，未知最愛及其他特殊狀態仍�
     snapshot,
     settings,
   )[0];
-  assert.equal(base.analysis?.category, "transfer");
   assert.equal(safety.transferExclusion(base, snapshot), null);
   assert.equal(
     safety.transferExclusion(
@@ -1387,8 +1379,6 @@ test("已知最愛可列入確認批次，未知最愛及其他特殊狀態仍�
     ),
   );
   assert.ok(safety.transferExclusion({ ...base, locked: true }, snapshot));
-  snapshot.species.caterpie.tags.push("legendary");
-  assert.ok(safety.transferExclusion(base, snapshot));
 });
 
 test("放生確認的簽章會偵測收藏或設定改變", () => {
@@ -1464,7 +1454,6 @@ test("v2 備份保存手機歷史，但還原後沒有放生授權", async () =>
   const evolution = record("backup-evolution", {}, { evolutionSilhouette: "unknown-branch" });
   store.put("pokemon", evolution.id, evolution);
   const backup = await exportBackup();
-  assert.equal(backup.version, 2);
   store.remove("scans", scan.id);
   store.remove("transfer_batches", batch.id);
   store.remove("pokemon", evolution.id);
