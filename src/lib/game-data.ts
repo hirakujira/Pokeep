@@ -40,6 +40,14 @@ const norm = (s: string) =>
     .replace(/galarian/g, "galar")
     .replace(/hisuian/g, "hisui")
     .replace(/paldean/g, "paldea");
+// PvPoke splits Hidden Power by type and spells a few move IDs differently.
+const moveKey = (id: string) =>
+  id
+    .replace(/_FAST$/, "")
+    .replace(/^AEGISLASH_CHARGE_/, "")
+    .replace(/^TECHNO_BLAST_DOUSE$/, "TECHNO_BLAST_WATER")
+    .replace(/^HIDDEN_POWER_.+/, "HIDDEN_POWER")
+    .replace(/_/g, "");
 // PvPoke marks these available, special-case Pokémon as unreleased because
 // ordinary PvP simulations do not cover them. They still belong in the catalog.
 const catalogExceptions = new Set(["ditto", "shedinja", "cosmog", "cosmoem"]);
@@ -242,7 +250,8 @@ export function normalizeData(
   };
   const species: Snapshot["species"] = {},
     names: Record<string, string> = {},
-    moveNames: Record<string, string> = {};
+    moveNames: Record<string, string> = {},
+    poolGaps: [string, string[]][] = [];
   for (const p of pvp.pokemon) {
     if ((p.released === false && !catalogExceptions.has(p.speciesId)) ||
         !p.baseStats || p.tags?.includes("mega"))
@@ -262,6 +271,19 @@ export function normalizeData(
       zh +
       (suffix ? ` ${suffix}` : "") +
       (p.tags?.includes("shadow") ? "（暗影）" : "");
+    // The Game Master pool shows a move change before PvPoke picks it up; moves
+    // only PvPoke lists are mostly legacy moves the Game Master already dropped.
+    if (g && !p.speciesId.endsWith("_shadow")) {
+      const known = new Set(
+        [...(p.fastMoves || []), ...(p.chargedMoves || []), ...(p.eliteMoves || [])].map(moveKey),
+      );
+      const missing = [
+        ...(g.quickMoves || []), ...(g.cinematicMoves || []),
+        ...(g.eliteQuickMove || []), ...(g.eliteCinematicMove || []),
+      ].filter((m) => typeof m === "string" && !/^\d+$/.test(m) && !known.has(moveKey(m)));
+      if (missing.length)
+        poolGaps.push([p.speciesId, [...new Set(missing.map((m: string) => m.replace(/_FAST$/, "")))]]);
+    }
     const branches = g?.evolutionBranch || [],
       used = new Set<Raw>();
     const evolutions = (p.family?.evolutions || []).map((e: string) => {
@@ -425,6 +447,13 @@ export function normalizeData(
       "PvE 為簡化中性循環 DPS，不是指定頭目的實戰排名。",
       "資料來源 Game Master 可能含未確認欄位；活動開放狀態需核對遊戲。",
       "特殊物種的專屬強化成本及進化任務請核對遊戲；成本標為估算。",
+      ...(poolGaps.length
+        ? [
+            `Game Master 招式池有、PvPoke 尚未收錄（遊戲可能剛調整，評估仍以 PvPoke 為準）：${poolGaps
+              .map(([id, moves]) => `${names[id]} ${moves.map((m) => moveNames[m] ?? m).join("、")}`)
+              .join("；")}`,
+          ]
+        : []),
     ],
   };
 }

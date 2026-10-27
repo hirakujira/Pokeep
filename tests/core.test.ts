@@ -1460,6 +1460,43 @@ test("遊戲資料記錄每個物種可能的性別，性別形態依自己的 I
   assert.deepEqual(genders("fixture_0"), [undefined, false]);
 });
 
+test("更新資料時列出 Game Master 招式池有、PvPoke 尚未收錄的招式", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number, moves: Record<string, string[]> = {}) => ({
+    speciesId: id, speciesName: id, dex, released: true,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [], ...moves,
+    ...(id.endsWith("_shadow") && { tags: ["shadow"] }),
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("grimer", 88, { fastMoves: ["MUD_SLAP"], eliteMoves: ["ACID"] }),
+    base("maschiff", 942, { fastMoves: ["BITE"], chargedMoves: ["CRUNCH"] }),
+    base("maschiff_shadow", 942, { fastMoves: ["BITE"], chargedMoves: ["CRUNCH"] }),
+    base("aegislash_shield", 681, { chargedMoves: ["AEGISLASH_CHARGE_PSYCHO_CUT"] }),
+  ];
+  const settings = (template: string, moves: Record<string, unknown[]>) => ({
+    templateId: template, data: { pokemonSettings: moves },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    settings("V0088_POKEMON_GRIMER", { quickMoves: ["MUD_SLAP_FAST"] }),
+    settings("V0942_POKEMON_MASCHIFF", { quickMoves: ["BITE_FAST"], cinematicMoves: ["CRUNCH", "PAYBACK", 497] }),
+    settings("V0681_POKEMON_AEGISLASH_SHIELD", { cinematicMoves: ["PSYCHO_CUT"] }),
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { warnings } = normalizeData({ pokemon, moves: [] }, gm, "", ranks, "test-version");
+  const gaps = warnings.filter((warning) => warning.includes("PvPoke 尚未收錄"));
+  assert.equal(gaps.length, 1);
+  assert.match(gaps[0], /：maschiff PAYBACK$/);
+});
+
 test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取淨化個體的進化成本與淨化成本", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, evolutions?: string[]) => ({
