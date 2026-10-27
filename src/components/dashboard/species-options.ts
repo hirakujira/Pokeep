@@ -1,4 +1,4 @@
-import { localizeForm } from "@/lib/species-names";
+import { localizeForm, normalFormTexts } from "@/lib/species-names";
 import type { VisualForm } from "@/lib/types";
 import type { Catalog } from "./types";
 
@@ -19,8 +19,7 @@ export const keptFormKey = "?raw";
 const normalForm = "一般";
 // The plain ID predates the plumage IDs, so it does not say which plumage it is.
 const unknownFormBases = new Set(["squawkabilly"]);
-// Same texts the evaluation treats as the ordinary form.
-const normalTexts = new Set(["一般", "normal"]);
+const normalTexts = new Set(normalFormTexts);
 
 function catalogFormLabel(s: Catalog["species"][number]) {
   if (unknownFormBases.has(s.id)) return unknownForm;

@@ -257,11 +257,12 @@ test("物種選單每個圖鑑編號一項，形態另列且無法判斷時為�
   assert.equal(pick(744, "rockruff", "normal").label, "一般");
   assert.equal(pick(648, "meloetta_aria", "歌聲形態").label, "一般");
 
-  const unknownSea = formChoice(byDex[422], "shellos", "普通");
-  assert.equal(unknownSea.selected.label, "待確認（原始辨識「普通」）");
+  const unknownSea = formChoice(byDex[422], "shellos", "藍花");
+  assert.equal(unknownSea.selected.label, "待確認（原始辨識「藍花」）");
   assert.equal(unknownSea.options[0], unknownSea.selected);
-  assert.equal(unknownSea.selected.form, "普通");
-  assert.equal(formChoice(byDex[16], "pidgey", "普通").selected.label, "一般（原始辨識「普通」）");
+  assert.equal(unknownSea.selected.form, "藍花");
+  assert.equal(formChoice(byDex[16], "pidgey", "普通").selected.label, "一般");
+  assert.equal(formChoice(byDex[16], "pidgey", "放鬆模式").selected.label, "一般（原始辨識「放鬆模式」）");
 
   const ids = new Set(formCatalog.species.map((s) => s.id));
   assert.equal(speciesWithShadow("rattata_alolan", true, ids), "rattata_alolan_shadow");

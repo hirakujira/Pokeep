@@ -10,7 +10,7 @@ import {
 } from "../types";
 import { now } from "../store";
 import { moveName } from "../move-names";
-import { localizeForm } from "../species-names";
+import { localizeForm, normalFormTexts } from "../species-names";
 import { combatPower, inferLevels, powerCost, rankIV } from "./stats";
 import { evolutionPaths, type EvolutionPath } from "./evolution";
 import { cycleDps, raidBenchmarks } from "./raid";
@@ -50,7 +50,7 @@ function baseAnalysis(p: Pokemon, snapshot: Snapshot | null): Analysis {
 // same form vary ("攻擊形態", "(Attack)", "attack") and must not split groups.
 export function collectionForm(f: Fields, s: Species) {
   if (s.form) return s.form;
-  return !f.form || f.form === "一般" || f.form === "normal" ? "normal" : f.form;
+  return !f.form || normalFormTexts.includes(f.form.trim().toLowerCase()) ? "normal" : f.form;
 }
 // Regional variants are ordinary catches, so they do not earn a special form
 // slot; they still stay separate from the original form in every group.

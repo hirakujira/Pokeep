@@ -79,6 +79,9 @@ const formNames: Record<string, string> = {
   Stretchy: "平挺姿勢",
 };
 
+/** Scanned form texts that name the ordinary form ("普通" comes from OCR of the summary page). */
+export const normalFormTexts = ["一般", "普通", "normal"];
+
 export function localizeForm(form: string, speciesId?: string | null): string | undefined {
   return form === "Hero" && speciesId?.startsWith("palafin")
     ? "全能形態"

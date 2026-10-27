@@ -420,6 +420,20 @@ test("幻之寶可夢先顯示稀有度，同形態不同寫法歸入同一收�
   assert.deepEqual(reasons.map((r) => r.some((x) => x.includes("高 IV 收藏代表"))), [true, false, false]);
 });
 
+test("掃描到「普通」等一般形態寫法時歸入同一收藏組", () => {
+  const snapshot = fixture();
+  snapshot.species.charmander = species("charmander");
+  const evaluated = evaluateCollection(
+    [null, "一般", "普通", " Normal "].map((form, index) => record(`plain-${index}`, {
+      speciesId: "charmander", form, costume: "南瓜帽",
+    })),
+    snapshot, { ...settings, rareRepresentatives: 1 },
+  );
+  assert.equal(evaluated.filter((p) =>
+    p.analysis?.reasons.includes("服裝「南瓜帽」收藏代表（同組前 1 名）"),
+  ).length, 1);
+});
+
 test("未登錄進化剪影與已匯入收藏缺少下一階即列為可進化", () => {
   const snapshot = fixture();
   snapshot.species.caterpie.evolutions = [
