@@ -4,7 +4,6 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   defaultSettings,
-  type Job,
   type Observation,
   type Pokemon,
   type Settings,
@@ -28,7 +27,6 @@ export function db() {
       "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
     );
     for (const table of [
-      "jobs",
       "observations",
       "pokemon",
       "settings",
@@ -46,7 +44,6 @@ export function db() {
   return globalDb.pogoDb;
 }
 type Table =
-  | "jobs"
   | "observations"
   | "pokemon"
   | "settings"
@@ -89,7 +86,6 @@ export function transaction<T>(fn: () => T): T {
   }
 }
 export const listPokemon = () => all<Pokemon>("pokemon");
-export const listJobs = () => all<Job>("jobs").reverse();
 export const listObservations = (jobId: string) =>
   all<Observation>("observations").filter((o) => o.jobId === jobId);
 export const getSettings = () =>
@@ -103,11 +99,4 @@ export function saveSnapshot(snapshot: Snapshot) {
     put("snapshots", snapshot.version, snapshot);
     put("settings", "snapshot", { version: snapshot.version });
   });
-}
-export function updateJob(jobId: string, patch: Partial<Job>) {
-  const job = get<Job>("jobs", jobId);
-  if (!job) throw new Error("找不到分析工作");
-  const next = { ...job, ...patch, updatedAt: now() };
-  put("jobs", jobId, next);
-  return next;
 }

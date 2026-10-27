@@ -23,8 +23,7 @@ const {
   reconcileReviewedEvidence,
   cycleDps,
 } = await import("../src/lib/evaluate");
-const { matching, integrateObservations } = await import("../src/lib/matching");
-const { reconcileIV, recognize } = await import("../src/lib/vision");
+const { matching } = await import("../src/lib/matching");
 const { measureIV } = await import("../src/lib/iv");
 const { evolutionSilhouette } = await import("../src/lib/evolution-silhouette");
 const { maxStatusFromOcr, maxStatusFromEvidence } = await import("../src/lib/max-status");
@@ -61,12 +60,12 @@ test("自動核對失敗列出保存的畫面缺口", () => {
     capturedAt: "2026-10-26T00:00:00.000Z",
   };
   const top: Observation = {
-    id: "top", jobId: "scan", segment: "item", frame: item.frame,
-    time: 0, video: "iPhone Use", kind: "details", issues: [], ivMeasured: null,
+    id: "top", jobId: "scan", frame: item.frame, issues: [], ivMeasured: null,
+    capturedAt: item.capturedAt, scanItemId: item.id,
     fields: { ...emptyFields(), name: "喵喵", cp: 14 },
   };
   const appraisal: Observation = {
-    ...top, id: "iv", frame: item.appraisalFrame!, kind: "appraisal",
+    ...top, id: "iv", frame: item.appraisalFrame!,
     ivMeasured: [10, 12, 14],
     fields: { ...emptyFields(), cp: 14, ivAtk: 10, ivDef: 12, ivSta: 14 },
   };
@@ -1108,53 +1107,6 @@ test("相同物種與 CP 仍不足以自動配對", () => {
   assert.equal(matching(a, { ...a, weight: 3 }), "different");
   assert.equal(matching(a, { ...a }), "exact");
 });
-const observation = (
-  key: string,
-  fields = record("x").fields,
-): Observation => ({
-  id: key,
-  jobId: "job",
-  segment: key,
-  frame: `job/${key}.jpg`,
-  time: 1,
-  video: "other.mp4",
-  fields,
-  issues: [],
-  ivMeasured: null,
-  kind: "details",
-});
-test("跨錄影唯一完整指紋才合併，人工修正不被覆蓋", () => {
-  const p = record("a", {}, { overrides: { name: "我改的名字" } }),
-    rows = integrateObservations([observation("one")], [p]);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].overrides.name, "我改的名字");
-  assert.equal(rows[0].sources.length, 1);
-});
-test("多個候選不能自動合併；未知資料也不亂合併", () => {
-  const rows = integrateObservations(
-    [observation("one")],
-    [record("a"), record("b")],
-  );
-  assert.equal(rows.length, 3);
-  assert.equal(rows[2].candidates.length, 2);
-  assert.equal(rows[0].verified, false);
-});
-test("同一切段讀到不同物種時拆成兩個個體", () => {
-  const a = observation("a"),
-    b = {
-      ...observation("b", { ...record("x").fields, speciesId: "dewpider" }),
-      segment: "a",
-    };
-  assert.equal(integrateObservations([a, b], []).length, 2);
-});
-test("AI 與評價條數字不一致時必須要求核對", () => {
-  const result = reconcileIV(
-    { ...emptyFields(), ivAtk: 15, ivDef: 10, ivSta: 8 },
-    [14, 10, 8],
-  );
-  assert.equal(result.issues.length, 1);
-  assert.equal(result.fields.ivAtk, 15);
-});
 test("量測所有 IV 刻度邊界：0、1、5、10、14、15", async () => {
   for (const value of [0, 1, 5, 10, 14, 15]) {
     const bars = [920, 980, 1040]
@@ -1184,135 +1136,6 @@ test("量測所有 IV 刻度邊界：0、1、5、10、14、15", async () => {
       [value, value, value],
       `saved evidence value ${value}`,
     );
-  }
-});
-test("沒有 API key 時不假裝已辨識", async () => {
-  fs.mkdirSync(path.join(temp, "frames", "test"), { recursive: true });
-  fs.writeFileSync(
-    path.join(temp, "frames", "test", "one.jpg"),
-    await sharp({
-      create: { width: 100, height: 100, channels: 3, background: "white" },
-    })
-      .jpeg()
-      .toBuffer(),
-  );
-  store.remove("settings", "runtime-config");
-  await assert.rejects(
-    () =>
-      recognize("test/one.jpg", null, new AbortController().signal, () => {}),
-    /API key/,
-  );
-});
-test("Responses API 結構化辨識會重試429、記錄用量並快取相同畫面", async () => {
-  const original = globalThis.fetch;
-  store.put("settings", "runtime-config", {
-    apiKey: "test-not-a-real-key",
-    baseUrl: "http://127.0.0.1:1234/v1",
-  });
-  let calls = 0;
-  const urls: string[] = [];
-  const parsed = {
-    kind: "appraisal",
-    fields: record("response").fields,
-    issues: [],
-    clear: true,
-  };
-  globalThis.fetch = async (input) => {
-    urls.push(String(input));
-    calls++;
-    if (calls === 1)
-      return new Response(
-        JSON.stringify({
-          error: { message: "rate limited", type: "rate_limit_error" },
-        }),
-        { status: 429, headers: { "Content-Type": "application/json" } },
-      );
-    return new Response(
-      JSON.stringify({
-        id: "resp_test",
-        object: "response",
-        created_at: 0,
-        status: "completed",
-        model: "gpt-4.1-mini",
-        output: [
-          {
-            id: "msg_test",
-            type: "message",
-            role: "assistant",
-            status: "completed",
-            content: [
-              {
-                type: "output_text",
-                text: JSON.stringify(parsed),
-                annotations: [],
-              },
-            ],
-          },
-        ],
-        usage: { input_tokens: 123, output_tokens: 45, total_tokens: 168 },
-      }),
-      { headers: { "Content-Type": "application/json" } },
-    );
-  };
-  try {
-    const usage: unknown[] = [];
-    const first = await recognize(
-      "test/one.jpg",
-      fixture(),
-      new AbortController().signal,
-      (u) => usage.push(u),
-    );
-    assert.equal(first.fields.cp, 179);
-    assert.equal(calls, 2);
-    assert.deepEqual(usage, [{ input: 123, output: 45, cached: false }]);
-    await recognize(
-      "test/one.jpg",
-      fixture(),
-      new AbortController().signal,
-      (u) => usage.push(u),
-    );
-    assert.equal(calls, 2);
-    assert.ok(urls.every((url) => url === "http://127.0.0.1:1234/v1/responses"));
-    assert.deepEqual(usage[1], { input: 0, output: 0, cached: true });
-    store.put("settings", "runtime-config", {
-      apiKey: "test-not-a-real-key",
-      baseUrl: "http://127.0.0.1:5678/v1",
-    });
-    await recognize(
-      "test/one.jpg",
-      fixture(),
-      new AbortController().signal,
-      (u) => usage.push(u),
-    );
-    assert.equal(calls, 3, "切換伺服器後必須重新辨識，不能共用舊快取");
-    assert.equal(urls[2], "http://127.0.0.1:5678/v1/responses");
-  } finally {
-    globalThis.fetch = original;
-    store.remove("settings", "runtime-config");
-  }
-});
-test("AI 等候重試時可以取消，不繼續產生請求", async () => {
-  const original = globalThis.fetch;
-  store.put("settings", "runtime-config", { apiKey: "test-not-a-real-key" });
-  const control = new AbortController();
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls++;
-    setTimeout(() => control.abort(), 20);
-    return new Response(
-      JSON.stringify({ error: { message: "rate limited" } }),
-      { status: 429, headers: { "Content-Type": "application/json" } },
-    );
-  };
-  try {
-    await assert.rejects(
-      () => recognize("test/one.jpg", null, control.signal, () => {}),
-      /取消/,
-    );
-    assert.equal(calls, 1);
-  } finally {
-    globalThis.fetch = original;
-    store.remove("settings", "runtime-config");
   }
 });
 test("完整備份可還原個體與遊戲資料快照（含 Mega、極巨化、淨化與外觀形態），重複匯入不覆蓋人工修正", async () => {

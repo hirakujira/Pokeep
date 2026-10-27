@@ -90,30 +90,22 @@ export const maxStatusSchema = z.enum(["none", "dynamax", "gigantamax"]).nullabl
 const evidenceSchema = z.object({
   observationId: z.string().max(100),
   frame: frameSchema,
-  time: z.number().min(0).max(600),
-  video: z.string().max(200),
   fields: z.array(
     z.enum(Object.keys(fieldsSchema.shape) as [keyof Fields, ...(keyof Fields)[]]),
   ),
-  source: z.enum(["video", "iphone"]).optional(),
-  capturedAt: z.string().datetime().optional(),
-  scanItemId: z.string().max(100).optional(),
+  capturedAt: z.string().datetime(),
+  scanItemId: z.string().max(100),
 });
 export type Evidence = z.infer<typeof evidenceSchema>;
 export const observationSchema = z.object({
   id: z.string().max(100),
   jobId: z.string().max(100),
-  segment: z.string().max(100),
   frame: frameSchema,
-  time: z.number().min(0).max(600),
-  video: z.string().max(200),
   fields: fieldsSchema,
   issues: z.array(z.string().max(500)),
   ivMeasured: ivMeasuredSchema,
-  kind: z.string().max(50),
-  source: z.enum(["video", "iphone"]).optional(),
-  capturedAt: z.string().datetime().optional(),
-  scanItemId: z.string().max(100).optional(),
+  capturedAt: z.string().datetime(),
+  scanItemId: z.string().max(100),
 });
 export type Observation = z.infer<typeof observationSchema>;
 export const pokemonSchema = z.object({
@@ -228,31 +220,6 @@ export type Analysis = {
   comparedWith: string[];
   snapshot: string | null;
   evaluatedAt: string;
-};
-export type JobStatus =
-  "queued" | "processing" | "review" | "completed" | "failed" | "cancelled";
-export type VideoFile = {
-  id: string;
-  name: string;
-  path: string;
-  size: number;
-  duration: number;
-  width: number;
-  height: number;
-};
-export type Job = {
-  id: string;
-  name: string;
-  status: JobStatus;
-  stage: string;
-  progress: number;
-  files: VideoFile[];
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-  usage: { input: number; output: number; requests: number; cached: number };
-  notices: string[];
-  attempts: number;
 };
 export const speciesSchema = z.object({
   id: z.string(),

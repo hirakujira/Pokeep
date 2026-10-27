@@ -18,14 +18,7 @@ export const duration = (ms: number | null) => {
   if (minutes < 60) return `${minutes} 分 ${seconds % 60} 秒`;
   return `${Math.floor(minutes / 60)} 小時 ${minutes % 60} 分`;
 };
-export const sourceTime = (source: Evidence) =>
-  source.source === "iphone"
-    ? source.capturedAt
-      ? date(source.capturedAt)
-      : "擷取時間未知"
-    : `${source.time.toFixed(2)} 秒`;
-export const sourceName = (source: Evidence) =>
-  source.source === "iphone" ? "iPhone 掃描" : source.video;
+export const sourceTime = (source: Evidence) => date(source.capturedAt);
 export const speciesLabel = (
   catalog: Catalog,
   speciesId: string | null,

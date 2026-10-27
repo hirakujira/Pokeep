@@ -700,10 +700,7 @@ test("重來會清除未完成掃描及其個體和截圖，保留其他收藏",
     sources: [{
       observationId: "discard-observation",
       frame: `${scanId}/top.jpg`,
-      time: 0,
-      video: "iPhone Use",
       fields: [],
-      source: "iphone",
       scanItemId: "discard-item",
       capturedAt: stamp,
     }],
@@ -714,15 +711,10 @@ test("重來會清除未完成掃描及其個體和截圖，保留其他收藏",
   store.put("observations", "discard-observation", {
     id: "discard-observation",
     jobId: scanId,
-    segment: "discard-item",
     frame: `${scanId}/top.jpg`,
-    time: 0,
-    video: "iPhone Use",
     fields: record("discard-pokemon").fields,
     issues: [],
     ivMeasured: null,
-    kind: "details",
-    source: "iphone",
     scanItemId: "discard-item",
     capturedAt: stamp,
   });
@@ -767,11 +759,6 @@ test("狀態介面只回傳 API 是否設定，不暴露 key", async () => {
   assert.equal((await (await request("state")).json()).apiConfigured, false);
   delete process.env.OPENAI_API_KEY;
   store.remove("settings", "runtime-config");
-});
-test("錄影建立與上傳介面已停用", async () => {
-  assert.equal((await request("jobs", "POST", { name: "舊入口" })).status, 404);
-  assert.equal((await request("jobs/legacy/files?name=a.mp4", "PUT", new Uint8Array())).status, 404);
-  assert.equal((await request("jobs/legacy/start", "POST", {})).status, 404);
 });
 test("人工修正會持久保存、重新評估且可標記放生再恢復", async () => {
   store.saveSnapshot(fixture());

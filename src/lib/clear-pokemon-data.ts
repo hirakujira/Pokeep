@@ -16,7 +16,6 @@ export function clearPokemonData() {
     for (const table of [
       "pokemon",
       "observations",
-      "jobs",
       "scans",
       "scan_items",
       "transfer_batches",

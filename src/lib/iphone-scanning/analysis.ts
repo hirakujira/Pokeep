@@ -374,15 +374,10 @@ function scanObservations(
   return frames.map((frame, index) => ({
     id: `${scanId}-${item.position}-${index}`,
     jobId: scanId,
-    segment: item.id,
     frame,
-    time: 0,
-    video: "iPhone Use",
     fields: screens[index],
     issues: index === 2 ? issues : [],
     ivMeasured: index === 2 ? item.measuredIV || null : null,
-    kind: ["details", "details", "appraisal"][index],
-    source: "iphone",
     capturedAt: item.capturedAt,
     scanItemId: item.id,
   }));
@@ -418,12 +413,9 @@ function saveNewRecord(
     sources: observations.map((o) => ({
       observationId: o.id,
       frame: o.frame,
-      time: 0,
-      video: "iPhone Use",
       fields: (Object.keys(o.fields) as (keyof Fields)[]).filter(
         (key) => o.fields[key] !== null,
       ),
-      source: "iphone",
       capturedAt: item.capturedAt,
       scanItemId: item.id,
     })),

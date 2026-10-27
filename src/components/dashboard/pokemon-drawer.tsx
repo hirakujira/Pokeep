@@ -18,7 +18,6 @@ import { DrawerAnalysis } from "./drawer-analysis";
 import {
   displayPokemonName,
   reviewPromptsFor,
-  sourceName,
   sourceTime,
   speciesLabel,
 } from "./format";
@@ -480,7 +479,7 @@ export function PokemonDrawer({
                   {activeSource && !proofError ? (
                     <img
                       src={`/api/frames/${activeSource.frame}`}
-                      alt={`${sourceName(activeSource)} ${sourceTime(activeSource)} 來源截圖`}
+                      alt={`iPhone 掃描 ${sourceTime(activeSource)} 來源截圖`}
                       onError={() => setProofError(true)}
                     />
                   ) : (
@@ -492,7 +491,7 @@ export function PokemonDrawer({
                   {activeSource && (
                     <div>
                       <strong>{sourceTime(activeSource)}</strong>
-                      <small>{sourceName(activeSource)}</small>
+                      <small>iPhone 掃描</small>
                       <button
                         className="text-button"
                         onClick={() => setSection("sources")}
@@ -639,11 +638,11 @@ export function PokemonDrawer({
                   >
                     <img
                       src={`/api/frames/${s.frame}`}
-                      alt={`${sourceName(s)} ${sourceTime(s)} 來源畫面`}
+                      alt={`iPhone 掃描 ${sourceTime(s)} 來源畫面`}
                       loading="lazy"
                     />
                     <strong>{sourceTime(s)}</strong>
-                    <small>{sourceName(s)}</small>
+                    <small>iPhone 掃描</small>
                     <span>{s.fields.length} 個可見欄位</span>
                   </button>
                 ))}

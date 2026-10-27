@@ -48,8 +48,8 @@ export function verificationEvidenceGaps(
 }
 
 function unverifiedReason(p: Pokemon, a: Analysis) {
-  const source = p.sources.find((entry) => entry.source === "iphone" && entry.scanItemId);
-  const item = source?.scanItemId ? get<ScanItem>("scan_items", source.scanItemId) : null;
+  const source = p.sources[0];
+  const item = source ? get<ScanItem>("scan_items", source.scanItemId) : null;
   const observation = (frame: string | null | undefined) => {
     const evidence = p.sources.find((entry) => entry.frame === frame &&
       entry.scanItemId === source?.scanItemId);
