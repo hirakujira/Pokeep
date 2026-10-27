@@ -115,17 +115,12 @@ function recommendEvolution(
     a.actions.unshift(`可考慮${kind}以登錄圖鑑。`);
     return;
   }
-  // The Game Master cost wins over the screen reading, which can mistake the
-  // candy icon for a digit (25 read as 125); the screen only fills a gap.
-  const required = (option: EvolutionOption) =>
-    (f.purified ? option.candyPurified : option.candy) ||
-    (f.evolutionCandy ?? stepCandy(option, f.purified));
   a.evolutionCandy = {
     available: f.candy,
     options: evolution.map((option) => ({
       speciesId: option.target.id,
       name: option.target.name,
-      required: required(option),
+      required: stepCandy(option, f.purified),
       condition: option.condition,
     })),
   };
@@ -277,11 +272,21 @@ function addCombatActions(
       a.actions.push(
         `PvP 目標招式：${bestLeague.moves.map((m) => moveName(m, snapshot?.moveNames)).join("／")}。缺少 ${missing.map((m) => moveName(m, snapshot?.moveNames)).join("、")}；該用哪種學習器見下方「招式學習器」。`,
       );
-    if (!f.chargeMove2)
+    if (!f.chargeMove2) {
+      const unlock = secondMoveCost(f, snapshot);
       a.actions.push(
-        `PvP 通常需第二特殊招式；${f.secondMoveDust !== null ? `畫面顯示開招需 ${f.secondMoveDust.toLocaleString()} 星塵及 ${f.secondMoveCandy ?? "未知"} 糖果` : "請核對遊戲中的開招成本"}。`,
+        `PvP 通常需第二特殊招式；${unlock ? `開招需 ${unlock.dust.toLocaleString()} 星塵及 ${unlock.candy} 糖果` : "請核對遊戲中的開招成本"}。`,
       );
+    }
   }
+}
+// Shadow Pokémon pay 1.2× and purified Pokémon 0.8× the regular cost. Smeargle
+// lists no stardust and an unreachable candy cost.
+function secondMoveCost(f: Fields, snapshot: Snapshot | null) {
+  const cost = f.speciesId ? snapshot?.species[f.speciesId]?.thirdMove : null;
+  if (!cost?.dust) return null;
+  const rate = f.shadow ? 1.2 : f.purified ? 0.8 : 1;
+  return { dust: Math.round(cost.dust * rate), candy: Math.round(cost.candy * rate) };
 }
 export function categorize(p: Pokemon, d: CollectionDecisions) {
   const a = p.analysis!,

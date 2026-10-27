@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { fixture, record, species, settings } from "./fixtures";
-import { effective, emptyFields, settingsSchema, type Observation, type Pokemon } from "../src/lib/types";
+import { effective, emptyFields, settingsSchema, type Fields, type Observation, type Pokemon } from "../src/lib/types";
 import { canonicalCostume, costumeVocabulary, knownCostumes } from "../src/lib/costumes";
 import type { ScanItem } from "../src/lib/iphone-types";
 
@@ -599,7 +599,7 @@ test("外觀形態（花色、海域）各算一個形態收藏代表，進化�
   assert.match(undecided.analysis?.reasons[0] || "", /進化剪影尚未判定/);
 });
 
-test("可進化個體比較持有糖果與進化成本，遊戲資料優先於畫面讀值，分支成本不同時分開列出", () => {
+test("可進化個體比較持有糖果與進化成本，成本只取遊戲資料，分支成本不同時分開列出", () => {
   const snapshot = fixture();
   snapshot.species.caterpie.evolutions = [
     { id: "metapod", candy: 12, candyPurified: 10, condition: null },
@@ -612,7 +612,7 @@ test("可進化個體比較持有糖果與進化成本，遊戲資料優先於�
     ], snapshot, settings)[0].analysis;
   const required = (...args: Parameters<typeof assessCandy>) =>
     assessCandy(...args)?.evolutionCandy?.options[0].required;
-  // The screen read the candy icon as a leading 1; the Game Master cost still wins.
+  // A stored screen reading (the candy icon read as a leading 1) is ignored.
   assert.deepEqual(assessCandy("short", 8, 112)?.evolutionCandy, {
     available: 8,
     options: [{ speciesId: "metapod", name: "metapod", required: 12, condition: null }],
@@ -623,10 +623,7 @@ test("可進化個體比較持有糖果與進化成本，遊戲資料優先於�
   const purified = record("x", { purified: true }).fields;
   assert.equal(evolutionPaths(snapshot.species.caterpie, purified, snapshot)[1].candy, 10);
   snapshot.species.caterpie.evolutions = [{ id: "metapod", candy: 12, condition: null }];
-  assert.equal(required("purified-screen", 11, 10, true), 10);
-  assert.equal(required("purified-estimate", 11, null, true), 11);
-  snapshot.species.caterpie.evolutions = [{ id: "metapod", candy: 0, condition: null }];
-  assert.equal(required("no-game-data", 30, 12), 12);
+  assert.equal(required("purified-estimate", 11, 10, true), 11);
   snapshot.species.caterpie.evolutions = [
     { id: "metapod", candy: 12, condition: null },
     { id: "butterfree", candy: 50, condition: "道具" },
@@ -1023,6 +1020,29 @@ test("環境排名好仍須具備個體條件，不只看 IV 總和", () => {
     "invest",
   );
 });
+test("開招成本取遊戲資料：暗影 1.2 倍、淨化 0.8 倍，不用畫面讀值", () => {
+  const s = fixture();
+  s.species.caterpie_shadow = species("caterpie_shadow", { tags: ["shadow"] });
+  s.rankings["1500"] = ["caterpie", "caterpie_shadow"].map((speciesId) =>
+    ({ speciesId, score: 100, moves: ["BUG_BITE", "STRUGGLE"] }));
+  const unlock = (id: string, patch: Partial<Fields> = {}) => evaluateCollection([record(id, {
+    ivAtk: 15,
+    ivDef: 15,
+    ivSta: 15,
+    cp: combatPower(s.species.caterpie, [15, 15, 15], 15, s),
+    hp: hitPoints(s.species.caterpie, 15, 15, s),
+    fastMove: "BUG_BITE",
+    chargeMove: "STRUGGLE",
+    secondMoveDust: 99999,
+    secondMoveCandy: 999,
+    ...patch,
+  })], s, settings)[0].analysis?.actions.find((x) => x.startsWith("PvP 通常需第二特殊招式"));
+  assert.equal(unlock("regular"), "PvP 通常需第二特殊招式；開招需 10,000 星塵及 25 糖果。");
+  assert.match(unlock("shadow", { speciesId: "caterpie_shadow", shadow: true }) ?? "", /開招需 12,000 星塵及 30 糖果/);
+  assert.match(unlock("purified", { purified: true }) ?? "", /開招需 8,000 星塵及 20 糖果/);
+  s.species.caterpie.thirdMove = { candy: 9999999 } as never;
+  assert.match(unlock("no-stardust") ?? "", /請核對遊戲中的開招成本/);
+});
 test("未核對的高IV候選不會擠掉已核對個體的PvP名額", () => {
   const s = fixture();
   s.rankings["1500"] = [{ speciesId: "caterpie", score: 100, moves: [] }];
@@ -1044,11 +1064,15 @@ test("未核對的高IV候選不會擠掉已核對個體的PvP名額", () => {
 });
 test("暗影淨化 IV 每項 +2 且不超過15；不因滿IV直接推薦淨化", () => {
   const s = fixture();
-  s.species.caterpie_shadow = species("caterpie_shadow", { tags: ["shadow"] });
+  s.species.caterpie_shadow = species("caterpie_shadow", {
+    tags: ["shadow"],
+    purification: { dust: 3000, candy: 3 },
+  });
   const iv = [13, 14, 15],
     p = record("x", {
       speciesId: "caterpie_shadow",
       shadow: true,
+      purificationDust: 15000,
       ivAtk: 13,
       ivDef: 14,
       ivSta: 15,
@@ -1058,6 +1082,7 @@ test("暗影淨化 IV 每項 +2 且不超過15；不因滿IV直接推薦淨化",
   const a = evaluateCollection([p], s, settings)[0].analysis!;
   assert.deepEqual(a.purification?.iv, [15, 15, 15]);
   assert.match(a.purification!.verdict, /先保留暗影/);
+  assert.deepEqual(a.purification?.cost, { dust: 3000, candy: 3 });
 });
 test("簡化 DPS 納入暗影加成，但缺招式資料不產生假數字", () => {
   const s = fixture();
@@ -1435,7 +1460,7 @@ test("遊戲資料記錄每個物種可能的性別，性別形態依自己的 I
   assert.deepEqual(genders("fixture_0"), [undefined, false]);
 });
 
-test("性別分歧的進化依性別對應各自的路線與物種 ID", async () => {
+test("性別分歧的進化依性別對應各自的路線與物種 ID；讀取淨化個體的進化成本與淨化成本", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, evolutions?: string[]) => ({
     speciesId: id, speciesName: id, dex, released: true,
@@ -1449,9 +1474,9 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID", async ()
     base("litleo", 667, ["pyroar", "pyroar"]), base("pyroar", 668),
     base("snorunt", 361, ["froslass", "glalie"]), base("froslass", 478), base("glalie", 362),
   ];
-  const branches = (dex: number, name: string, evolutionBranch: Record<string, unknown>[]) => ({
+  const branches = (dex: number, name: string, evolutionBranch: Record<string, unknown>[], extra = {}) => ({
     templateId: `V${String(dex).padStart(4, "0")}_POKEMON_${name}`,
-    data: { pokemonSettings: { evolutionBranch } },
+    data: { pokemonSettings: { evolutionBranch, ...extra } },
   });
   const gm = [
     { templateId: "PLAYER_LEVEL_SETTINGS", data: {
@@ -1471,7 +1496,7 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID", async ()
     branches(361, "SNORUNT", [
       { evolution: "FROSLASS", candyCost: 100, genderRequirement: "FEMALE" },
       { evolution: "GLALIE", candyCost: 100, candyCostPurified: 90 },
-    ]),
+    ], { shadow: { purificationStardustNeeded: 3000, purificationCandyNeeded: 3 } }),
   ];
   const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
     [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
@@ -1482,6 +1507,8 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID", async ()
   assert.deepEqual(evolutions("litleo"), [["pyroar", "male"], ["pyroar", "female"]]);
   assert.deepEqual(evolutions("snorunt"), [["froslass", "female"], ["glalie", undefined]]);
   assert.deepEqual(result.snorunt.evolutions.map((e) => e.candyPurified), [undefined, 90]);
+  assert.deepEqual(result.snorunt.purification, { dust: 3000, candy: 3 });
+  assert.equal(result.espurr.purification, undefined);
 });
 
 test("遊戲資料標記可 Mega 進化或原始回歸的物種", async () => {

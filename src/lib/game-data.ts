@@ -352,6 +352,12 @@ export function normalizeData(
             candy: g.thirdMove.candyToUnlock,
           }
         : null,
+      purification: g?.shadow
+        ? {
+            dust: g.shadow.purificationStardustNeeded,
+            candy: g.shadow.purificationCandyNeeded,
+          }
+        : undefined,
       form: suffix || null,
     };
     names[p.speciesId] = name;

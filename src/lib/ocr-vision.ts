@@ -38,11 +38,6 @@ const movesSchema = fieldsSchema.pick({
   stardust: true,
   powerUpDust: true,
   powerUpCandy: true,
-  evolutionCandy: true,
-  secondMoveDust: true,
-  secondMoveCandy: true,
-  purificationDust: true,
-  purificationCandy: true,
 });
 const resultSchema = z.object({
   top: topSchema,
@@ -69,9 +64,9 @@ export type OcrVisionResult = {
   };
 };
 
-const promptVersion = "pogo-local-ocr-visual-v5";
+const promptVersion = "pogo-local-ocr-visual-v6";
 const instructions = `你是繁體中文 Pokémon GO 截圖資料校對器。輸入先由 macOS 本機 OCR 讀出三張畫面的文字，座標 [x,y] 是百分比，y 從畫面底部往上。另附一張只含能力頁上半部外觀的小圖，用來辨別物種形態、性別圖示、最愛、色違、暗影、淨化和服裝；招式與評價完整截圖沒有上傳。
-嚴格只根據 OCR 及局部外觀圖輸出 schema，未看見、不確定或 OCR 含糊的欄位填 null，不得從 CP 猜 IV。局部外觀圖右側的淺色矩形是刻意遮住捕獲日期的隱私遮罩，不是遊戲彈窗，不應因此設 hasUnexpectedOverlay 或 detailClear=false。top.name 和 appraisal.name 保留原始顯示名稱，暱稱不等於物種。speciesId 若有足夠外觀證據才用 PvPoke 英文 ID，阿羅拉等形態需分清。top.hp 取最大 HP（86/86 取 86）。moves 的招式輸出中文名稱，數字 5、55 是招式威力，不是糖果。只把新攻擊招式按鈕旁的數字填 secondMoveDust/Candy。重量 kg、高度 m。特殊狀態只有相關圖示、星號、完整外觀及效果都清楚可見時才判 true/false；無法判斷就 null。最愛星號空心可判 favorite=false，實心可判 true；色違圖示區完整可見且沒有色違圖示才可判 shiny=false；暗影與淨化若完整外觀與效果區都清楚呈普通狀態才可判 false。costumeAbsentClear 只有外觀完整清楚且明確沒有服裝才 true。costume 只寫服裝本身的簡短名稱（例如「聖誕帽」「花冠」），不加「頭戴」「佩戴」「胸前掛著」等位置或動作，也不寫物種名；若與「已知服裝名稱」中同一物種的某個名稱是同一種服裝，必須逐字使用該名稱。
+嚴格只根據 OCR 及局部外觀圖輸出 schema，未看見、不確定或 OCR 含糊的欄位填 null，不得從 CP 猜 IV。局部外觀圖右側的淺色矩形是刻意遮住捕獲日期的隱私遮罩，不是遊戲彈窗，不應因此設 hasUnexpectedOverlay 或 detailClear=false。top.name 和 appraisal.name 保留原始顯示名稱，暱稱不等於物種。speciesId 若有足夠外觀證據才用 PvPoke 英文 ID，阿羅拉等形態需分清。top.hp 取最大 HP（86/86 取 86）。moves 的招式輸出中文名稱，數字 5、55 是招式威力，不是糖果。重量 kg、高度 m。特殊狀態只有相關圖示、星號、完整外觀及效果都清楚可見時才判 true/false；無法判斷就 null。最愛星號空心可判 favorite=false，實心可判 true；色違圖示區完整可見且沒有色違圖示才可判 shiny=false；暗影與淨化若完整外觀與效果區都清楚呈普通狀態才可判 false。costumeAbsentClear 只有外觀完整清楚且明確沒有服裝才 true。costume 只寫服裝本身的簡短名稱（例如「聖誕帽」「花冠」），不加「頭戴」「佩戴」「胸前掛著」等位置或動作，也不寫物種名；若與「已知服裝名稱」中同一物種的某個名稱是同一種服裝，必須逐字使用該名稱。
 OCR 文字可能錯字、漏字、把數字前的圖示辨成字元；可依同一行與位置去除明顯圖示字元，但不猜測缺失欄位。能力與評價畫面名稱或 CP 不一致、畫面遮擋、像切換中的混合畫面，clear=false 並寫 issues。資源數字若 OCR 含糊就填 null，不因這類非身分欄位設 clear=false 或寫阻擋核對的 issues。不要輸出捕獲日期、地點、玩家姓名或其他個資。IV 條由本機像素量測，不在此輸出 IV。`;
 
 async function visualCrop(file: string) {

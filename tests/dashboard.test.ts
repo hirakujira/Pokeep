@@ -85,7 +85,7 @@ test("渲染團體戰比較時依排名顯示，但不改動已存的分析資�
     evaluatedAt: "2026-10-24T00:00:00.000Z",
   };
   const html = renderToString(
-    React.createElement(DrawerAnalysis, { analysis, fields: emptyFields(), moveNames: {} }),
+    React.createElement(DrawerAnalysis, { analysis, moveNames: {} }),
   );
   assert.deepEqual(raids.map((r) => r.rank), [3, 1, 2]);
   const positions = names.slice(1).map((name) => html.indexOf(name));
@@ -193,12 +193,23 @@ test("個體詳情列出各用途的學習器步驟與先進化提示", () => {
     ],
   });
   const html = renderToString(
-    React.createElement(DrawerAnalysis, { analysis, fields: emptyFields(), moveNames: { BUG_BUZZ: "蟲鳴" } }),
+    React.createElement(DrawerAnalysis, { analysis, moveNames: { BUG_BUZZ: "蟲鳴" } }),
   );
   assert.ok(html.includes("厲害招式學習器（特殊）"));
   assert.ok(html.includes("直接指定"));
   assert.ok(html.includes("遷怒平時無法用學習器移除"));
   assert.ok(html.includes("培養目標是進化後的 巴大蝶"));
+});
+
+test("淨化比較顯示遊戲資料的淨化成本，缺資料時不顯示", () => {
+  const html = (cost?: { dust: number; candy: number }) => renderToString(
+    React.createElement(DrawerAnalysis, {
+      analysis: analysisWith({ purification: { iv: [15, 15, 15], cp: 1500, verdict: "先保留暗影", cost } }),
+      moveNames: {},
+    }),
+  ).replace(/<!-- -->/g, "");
+  assert.ok(html({ dust: 3000, candy: 3 }).includes("淨化成本：3,000 星塵／3 糖果。"));
+  assert.ok(!html().includes("淨化成本"));
 });
 
 const {
@@ -314,7 +325,7 @@ test("詳細資料面板的服裝欄位提供同物種已用過的服裝名稱",
   assert.match(html, /<datalist id="costume-options"><option value="聖誕帽"><\/option><option value="花冠"><\/option><\/datalist>/);
 });
 
-test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單；不可能的進化與淨化成本停用", () => {
+test("性別與暗影依物種限制選項，只剩一個值時固定並停用；暗影與淨化合併為一個選單；資源欄位不列遊戲資料已知的成本", () => {
   const catalog = {
     ...formCatalog,
     species: [
@@ -380,22 +391,10 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   assert.match(select(render("magnemite", { shadow: false, purified: true }), "暗影"),
     /<option value="purified" selected="">暗影 - 已淨化<\/option>/);
 
-  const input = (html: string, label: string) =>
-    html.match(new RegExp(`<span>${label}(?:(?!</label>).)*?(<input[^>]*>)`))?.[1] ?? "";
-  const blocked = (html: string, label: string) => {
-    const field = input(html, label);
-    return /disabled=""/.test(field) ? field.match(/placeholder="([^"]*)"/)?.[1] : null;
-  };
-  const costs = (html: string) => ["進化糖果", "淨化星塵", "淨化糖果"].map((label) => blocked(html, label));
-  assert.deepEqual(costs(tauros), ["無法進化", "沒有暗影形態", "沒有暗影形態"]);
-  assert.deepEqual(costs(render("magnemite", { shadow: true, purified: false })), [null, null, null]);
-  assert.deepEqual(costs(magnemite), [null, null, null]);
-  assert.deepEqual(costs(render("magnemite", { shadow: false, purified: true })), [null, "已經淨化", "已經淨化"]);
-  assert.deepEqual(costs(render("magnemite", { shadow: false, purified: false })), [null, "不是暗影寶可夢", "不是暗影寶可夢"]);
-  assert.deepEqual(costs(render("unknown_species")), [null, null, null]);
-  const misread = render("tauros", { evolutionCandy: 25, purificationDust: 3000 });
-  assert.deepEqual(costs(misread), [null, null, "沒有暗影形態"]);
-  assert.match(input(misread, "進化糖果"), /value="25"/);
+  const shadowMagnemite = render("magnemite", { shadow: true, purified: false, evolutionCandy: 25, purificationDust: 3000 });
+  assert.match(shadowMagnemite, /<span>單次強化糖果</);
+  for (const label of ["進化糖果", "開招星塵", "開招糖果", "淨化星塵", "淨化糖果"])
+    assert.doesNotMatch(shadowMagnemite, new RegExp(`<span>${label}<`));
 
   const button = (html: string) => {
     const field = select(html, "進化按鈕狀態");

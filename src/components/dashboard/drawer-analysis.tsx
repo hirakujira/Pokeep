@@ -1,5 +1,5 @@
 import { ArrowUpRight, Check, Database, Info, Sparkles, Swords } from "lucide-react";
-import type { Fields, Pokemon } from "@/lib/types";
+import type { Pokemon } from "@/lib/types";
 import { localizeMoveText, moveName } from "@/lib/move-names";
 import { localizeSpeciesName } from "@/lib/species-names";
 import { typeName } from "@/lib/type-names";
@@ -9,11 +9,9 @@ import { CostLine, Status } from "./ui";
 
 export function DrawerAnalysis({
   analysis: a,
-  fields,
   moveNames,
 }: {
   analysis: Pokemon["analysis"];
-  fields: Fields;
   moveNames: Record<string, string>;
 }) {
   const candySummary = evolutionCandySummary(a?.evolutionCandy);
@@ -218,13 +216,12 @@ export function DrawerAnalysis({
             <strong>淨化後 IV {a.purification.iv.join(" / ")}</strong>
             <span>預估 CP {a.purification.cp ?? "待確認"}</span>
             <p>{a.purification.verdict}</p>
-            <p className="caption">
-              畫面淨化成本：
-              {fields.purificationDust === null
-                ? "未知"
-                : number(fields.purificationDust)}{" "}
-              星塵／{fields.purificationCandy ?? "未知"} 糖果。
-            </p>
+            {a.purification.cost && (
+              <p className="caption">
+                淨化成本：{number(a.purification.cost.dust)} 星塵／
+                {a.purification.cost.candy} 糖果。
+              </p>
+            )}
           </div>
         </section>
       )}

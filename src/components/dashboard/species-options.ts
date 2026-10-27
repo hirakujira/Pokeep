@@ -176,19 +176,3 @@ export function lacksEvolutionButton(speciesId: string | null, species: Map<stri
   const s = speciesId ? species.get(speciesId) : undefined;
   return s?.evolves === false && !s.mega;
 }
-
-/**
- * Why this Pokémon cannot have the cost, shown in place of the value; null
- * when it can. A stored value stays editable so a misread can be cleared.
- */
-export function unavailableCost(key: keyof Fields, f: Fields, species: Map<string, CatalogSpecies>) {
-  if (f[key] !== null) return null;
-  if (key === "evolutionCandy")
-    return f.speciesId && species.get(f.speciesId)?.evolves === false ? "無法進化" : null;
-  if (key !== "purificationDust" && key !== "purificationCandy") return null;
-  const state = shadowState(f),
-    allowed = speciesLimits(f.speciesId, species).shadow;
-  if (state === "purified") return "已經淨化";
-  if (allowed && !allowed.includes("shadow")) return "沒有暗影形態";
-  return state === "none" ? "不是暗影寶可夢" : null;
-}

@@ -177,6 +177,7 @@ function purificationAdvice(
         : null,
     verdict:
       "先保留暗影；淨化會改變輸出、IV 與聯盟 CP，不能只因滿 IV 就淨化。",
+    cost: s.purification,
   };
   if (regular) {
     const possibilities = [

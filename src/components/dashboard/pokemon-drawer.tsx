@@ -36,7 +36,6 @@ import {
   shadowStates,
   speciesLimits,
   speciesWithShadow,
-  unavailableCost,
   unknownForm,
   withFixedValues,
   type FormOption,
@@ -217,8 +216,7 @@ export function PokemonDrawer({
   const editor = (key: keyof Fields) => {
     const bool = ["shiny", "favorite"].includes(key),
       text = ["name", "costume"].includes(key),
-      moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key),
-      unavailable = unavailableCost(key, shown, speciesById);
+      moves = ["fastMove", "chargeMove", "chargeMove2"].includes(key);
     if (key === "speciesId") {
       const query = speciesQuery.trim().replace(/^#/, "").toLocaleLowerCase();
       const matches = entries.filter((e) =>
@@ -342,8 +340,7 @@ export function PokemonDrawer({
             min={0}
             max={key.startsWith("iv") ? 15 : undefined}
             value={String(fields[key] ?? "")}
-            disabled={unavailable !== null}
-            placeholder={unavailable ?? "未知"}
+            placeholder="未知"
             onChange={(e) =>
               set(
                 key,
@@ -605,11 +602,6 @@ export function PokemonDrawer({
                           "stardust",
                           "powerUpDust",
                           "powerUpCandy",
-                          "evolutionCandy",
-                          "secondMoveDust",
-                          "secondMoveCandy",
-                          "purificationDust",
-                          "purificationCandy",
                         ] as (keyof Fields)[]
                       ).map(editor)}
                     </div>
@@ -630,7 +622,7 @@ export function PokemonDrawer({
             </>
           )}
           {section === "analysis" && (
-            <DrawerAnalysis analysis={a} fields={fields} moveNames={moveNames} />
+            <DrawerAnalysis analysis={a} moveNames={moveNames} />
           )}
           {section === "sources" && (
             <div className="sources-view">

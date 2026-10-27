@@ -227,6 +227,7 @@ const snapshotSchema = z.object({
         }),
       ),
       thirdMove: z.object({ dust: z.number(), candy: z.number() }).nullable(),
+      purification: z.object({ dust: z.number(), candy: z.number() }).optional(),
       form: z.string().nullable(),
     }),
   ),

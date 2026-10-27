@@ -167,7 +167,6 @@ select {
 .list-controls select:hover {
   border-color: var(--ink-2);
 }
-.edit-field input:disabled,
 .edit-field select:disabled {
   border-color: var(--line);
   background-color: var(--surface-2);

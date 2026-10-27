@@ -30,6 +30,8 @@ export const fieldsSchema = z.object({
   stardust: numberOrNull,
   powerUpDust: numberOrNull,
   powerUpCandy: numberOrNull,
+  // No longer scanned or used because the Game Master gives these costs; kept
+  // so stored records and older backups still parse.
   evolutionCandy: numberOrNull,
   secondMoveDust: numberOrNull,
   secondMoveCandy: numberOrNull,
@@ -198,7 +200,13 @@ export type Analysis = {
       condition: string | null;
     }[];
   } | null;
-  purification: { iv: number[]; cp: number | null; verdict: string } | null;
+  purification: {
+    iv: number[];
+    cp: number | null;
+    verdict: string;
+    /** Missing when the Game Master lists no cost or the analysis predates it. */
+    cost?: { dust: number; candy: number };
+  } | null;
   /** Absent in analyses saved before move training advice existed. */
   moveTraining?: MoveTrainingAdvice[];
   comparedWith: string[];
@@ -259,6 +267,8 @@ export type Species = {
   /** Max forms this species can have; missing when the snapshot predates the Max data. */
   maxForms?: ("dynamax" | "gigantamax")[];
   thirdMove: { dust: number; candy: number } | null;
+  /** Cost to purify the shadow form; missing when the Game Master lists none or the snapshot predates it. */
+  purification?: { dust: number; candy: number };
   form: string | null;
 };
 /** An appearance-only form; `label` is the Traditional Chinese text stored in Fields.form. */
