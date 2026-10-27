@@ -18,7 +18,7 @@ const { uniqueFormFromStats, displayForm } = await import("../src/lib/iphone-for
 const { exportBackup, importBackup } = await import("../src/lib/backup");
 const { recoverInterruptedPhoneWork } =
   await import("../src/lib/iphone-recovery");
-const { typeNumericSearch, typeBackgroundSearch, typeNonBackgroundSearch, typeFilteredSearch, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, observeGameForeground, settleAfterSubmitted } =
+const { typeNumericSearch, typeBackgroundSearch, typeNonBackgroundSearch, typeFilteredSearch, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, observeGameForeground, settleAfterSubmitted, returnToBoxAfterSkip } =
   await import("../src/lib/iphone-transfer");
 const { cpCandidates, detailCp, searchResultCount, assertUniqueDexCp, standardTransferDialog, collectionSearchState, searchQueryMatches, backgroundQueryMatches, backgroundSearchDecision, nonBackgroundQuery, nonBackgroundQueryMatches, transferQueryMatches, croppedTransferQueryConsensus, croppedNonBackgroundQueryMatches, croppedNonBackgroundConsensus, croppedBackgroundTextCompatible } =
   await import("../src/lib/iphone-transfer-search");
@@ -250,6 +250,44 @@ test("放生後返回列表的點擊結果不明時不自動重試", async () =>
   } as Awaited<ReturnType<typeof observeGameForeground>>;
   await assert.rejects(() => settleAfterSubmitted(phone, dialog, false, async () => {}), /回應不明/);
   assert.equal(taps, 1);
+});
+
+test("跳過後先按詳情頁 X 返回列表；已在列表時不再點 X", async () => {
+  const frame = (id: string) => ({
+    app: "com.nianticlabs.pokemongo", observation_id: id,
+    image: { path: id, width: 100, height: 200, pixel_to_point: [1, 1] as [number, number] },
+    viewport: { width: 100, height: 200 },
+  });
+  const boxLines = [
+    { text: "寶可夢", confidence: 1, x: 0.44, y: 0.89 },
+    { text: "搜尋", confidence: 1, x: 0.4, y: 0.812 },
+  ];
+  const detailLines = [{ text: "CP555", confidence: 1, x: 0.5, y: 0.94 }];
+  const taps: Record<string, unknown>[] = [];
+  const phone = {
+    async call(name: string, args: Record<string, unknown>) {
+      if (name === "observe") return frame("box");
+      if (name === "tap") { taps.push(args); return { action_executed: true }; }
+      throw new Error(`Unexpected phone call: ${name}`);
+    },
+  } as unknown as IphoneMcp;
+  const readLines = async (id: string) => id === "box" ? boxLines : detailLines;
+  assert.equal((await returnToBoxAfterSkip(phone, frame("detail"), readLines)).observation_id, "box");
+  assert.equal(taps.length, 1);
+  assert.equal(taps[0].x, 9.5);
+  assert.equal(taps[0].y, 35.4);
+  assert.equal((await returnToBoxAfterSkip(phone, frame("box"), readLines)).observation_id, "box");
+  assert.equal(taps.length, 1);
+  const stuck = { async call(name: string, args: Record<string, unknown>) {
+    if (name === "observe") return frame("detail");
+    if (name === "tap") { taps.push(args); return { action_executed: true }; }
+    throw new Error(`Unexpected phone call: ${name}`);
+  } } as unknown as IphoneMcp;
+  await assert.rejects(
+    () => returnToBoxAfterSkip(stuck, frame("detail"), readLines),
+    /按 X 未回到寶可夢盒子列表/,
+  );
+  assert.equal(taps.length, 2);
 });
 
 test("連續同圖鑑編號只保留同一搜尋結果，換物種或最後一隻返回盒子", () => {
@@ -1236,13 +1274,21 @@ test("放生搜尋勾選條件使用繁中白名單、固定順序與完整字�
   assert.equal(transferSearchQuery(25, selected), "25&!背卡&!亮晶晶&!異色");
   assert.equal(transferSearchQuery(25, []), "25");
   assert.equal(transferSearchQuery(25, ["lucky"]), "25&!亮晶晶");
+  assert.equal(transferSearchQuery(25, ["background", "costume"]), "25&!背卡&!特殊");
+  assert.equal(transferSearchQuery(25, ["shiny", "costume", "background", "lucky"]), "25&!背卡&!亮晶晶&!異色&!特殊");
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!亮晶晶&!異色"), true);
+  assert.equal(allowedPhoneSearchQuery("25&!背卡&!特殊"), true);
+  assert.equal(allowedPhoneSearchQuery("25&!背卡&!亮晶晶&!異色&!特殊"), true);
   assert.equal(allowedPhoneSearchQuery("25&!異色"), true);
   assert.equal(allowedPhoneSearchQuery("25&!異色&!亮晶晶"), false);
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!背卡"), false);
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!未知"), false);
-  assert.throws(() => transferSearchQuery(25, ["lucky", "shiny", "costume"]), /最多兩項/);
+  assert.throws(() => transferSearchQuery(25, ["background", "lucky", "shiny", "costume", "shadow"]), /最多四項/);
+  assert.equal(allowedPhoneSearchQuery("25&!背卡&!亮晶晶&!異色&!特殊&!暗影"), false);
   assert.equal(transferQueryMatches([line("Q 25&!背卡&!亮晶晶&!異色")], 25, selected), true);
+  const selectedFour = ["shiny", "costume", "background", "lucky"] as const;
+  assert.equal(transferQueryMatches([line("Q 25&！背卡&！亮晶晶&！異色&！特殊")], 25, selectedFour), true);
+  assert.equal(transferQueryMatches([line("Q 25&！背卡&！亮晶晶&！異色")], 25, selectedFour), false);
   assert.equal(transferQueryMatches([line("Q 25&!背卡&!亮晶晶")], 25, selected), false);
   assert.equal(transferQueryMatches([line("Q 26&!背卡&!亮晶晶&!異色")], 25, selected), false);
   assert.equal(croppedTransferQueryConsensus([
@@ -1251,9 +1297,19 @@ test("放生搜尋勾選條件使用繁中白名單、固定順序與完整字�
     [line("25&!背卡&!亮晶晶&!異色")],
   ], 25, selected), true);
   assert.equal(croppedTransferQueryConsensus([
+    [line("Q25&！背卡&！亮晶晶&！異色")],
+    [line("Q25&！背卡&！亮晶晶&！異色")],
+    [line("Q25&！背卡&！亮晶晶")],
+  ], 25, selected), true);
+  assert.equal(croppedTransferQueryConsensus([
     [line("25&!背卡&!亮晶晶")],
     [line("25&!背卡&!亮晶晶")],
     [line("25&!背卡&!亮晶晶&!異色")],
+  ], 25, selected), false);
+  assert.equal(croppedTransferQueryConsensus([
+    [line("Q26&！背卡&！亮晶晶&！異色")],
+    [line("Q26&！背卡&！亮晶晶&！異色")],
+    [line("Q25&！背卡&！亮晶晶&！異色")],
   ], 25, selected), false);
   const typed: string[] = [];
   const submitted: string[] = [];

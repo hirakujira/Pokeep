@@ -158,6 +158,15 @@ export type Analysis = {
   raids: RaidResult[];
   currentLevels: number[];
   actions: string[];
+  evolutionCandy?: {
+    available: number | null;
+    options: {
+      speciesId: string;
+      name: string;
+      required: number;
+      condition: string | null;
+    }[];
+  } | null;
   purification: { iv: number[]; cp: number | null; verdict: string } | null;
   comparedWith: string[];
   snapshot: string | null;

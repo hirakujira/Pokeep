@@ -25,9 +25,9 @@ def main():
     if suffix not in ("", "&背卡"):
         selected = suffix.split("&!")
         if selected[0] != "" or len(selected) < 2 or len(set(selected[1:])) != len(selected[1:]):
-            raise ValueError("額外搜尋條件最多兩項且不能重複")
-        if len([term for term in selected[1:] if term != "背卡"]) > 2:
-            raise ValueError("額外搜尋條件最多兩項")
+            raise ValueError("搜尋排除條件最多四項且不能重複")
+        if len(selected[1:]) > 4:
+            raise ValueError("搜尋排除條件最多四項")
         if any(term not in terms for term in selected[1:]) or selected[1:] != sorted(selected[1:], key=terms.index):
             raise ValueError("不支援的放生搜尋條件順序")
 

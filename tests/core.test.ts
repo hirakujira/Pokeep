@@ -254,22 +254,22 @@ test("同物種多隻傳說寶可夢都不列入可放生", () => {
   assert.ok(evaluated.every((pokemon) => transferExclusion(pokemon, snapshot) === "傳說、幻之或究極異獸"));
 });
 
-test("未登錄進化剪影與完整盒子缺少下一階才列為可進化", () => {
+test("未登錄進化剪影與已匯入收藏缺少下一階即列為可進化", () => {
   const snapshot = fixture();
   snapshot.species.caterpie.evolutions = [
     { id: "metapod", candy: 12, condition: null },
   ];
   snapshot.species.metapod = species("metapod");
-  const first = record("unevolved", {}, { evolutionSilhouette: true });
+  const first = record("unevolved", { favorite: false }, { evolutionSilhouette: true });
   const fullBox = new Set([first.id]);
   assert.equal(
     evaluateCollection([first], snapshot, settings, fullBox)[0].analysis?.category,
     "evolve",
   );
-  assert.notEqual(
-    evaluateCollection([first], snapshot, settings)[0].analysis?.category,
-    "evolve",
-  );
+  const incompleteBox = evaluateCollection([first], snapshot, settings)[0];
+  assert.equal(incompleteBox.analysis?.category, "evolve");
+  assert.match(incompleteBox.analysis?.reasons.join(" ") || "", /已匯入且仍持有的收藏（盒子掃描未完成）/);
+  assert.ok(transferExclusion(incompleteBox, snapshot));
   const unknown = evaluateCollection(
     [{ ...first, evolutionSilhouette: null }], snapshot, settings, fullBox,
   )[0];
@@ -304,14 +304,14 @@ test("未登錄進化剪影與完整盒子缺少下一階才列為可進化", ()
   assert.match(uncertainBranch.analysis?.reasons.join(" ") || "", /進化結果不明/);
   assert.ok(transferExclusion(uncertainBranch, snapshot));
   const evolved = record("evolved", { speciesId: "metapod" });
-  assert.notEqual(
+  assert.equal(
     evaluateCollection(
       [first, evolved],
       snapshot,
       settings,
       new Set([first.id, evolved.id]),
     )[0].analysis?.category,
-    "evolve",
+    "review",
   );
   snapshot.species.caterpie.evolutions.push({
     id: "butterfree",
@@ -327,11 +327,41 @@ test("未登錄進化剪影與完整盒子缺少下一階才列為可進化", ()
     evaluateCollection([first, evolved], snapshot, settings, new Set([first.id, evolved.id]))[0].analysis?.category,
     "review",
   );
-  const another = record("another-branch", {}, { evolutionSilhouette: true });
+  const another = record("another-branch", { favorite: false }, { evolutionSilhouette: true });
   const ranked = evaluateCollection(
     [first, another], snapshot, settings, new Set([first.id, another.id]),
   );
   assert.equal(ranked.filter((pokemon) => pokemon.analysis?.category === "evolve").length, 1);
+  const duplicate = ranked.find((pokemon) => pokemon.analysis?.category !== "evolve")!;
+  assert.equal(duplicate.analysis?.category, "transfer");
+  assert.equal(transferExclusion(duplicate, snapshot), null);
+  const staleTransfer = { ...first, analysis: { ...duplicate.analysis!, reasons: [] } };
+  assert.match(transferExclusion(staleTransfer, snapshot) || "", /未登錄進化剪影/);
+});
+
+test("可進化個體比較持有糖果與畫面成本，分支成本不同時分開列出", () => {
+  const snapshot = fixture();
+  snapshot.species.caterpie.evolutions = [
+    { id: "metapod", candy: 12, condition: null },
+  ];
+  snapshot.species.metapod = species("metapod");
+  const assessCandy = (id: string, candy: number | null, evolutionCandy: number | null,
+    purified = false) => evaluateCollection([
+      record(id, { candy, evolutionCandy, purified, favorite: false },
+        { evolutionSilhouette: true }),
+    ], snapshot, settings)[0].analysis;
+  assert.deepEqual(assessCandy("short", 48, 50)?.evolutionCandy, {
+    available: 48,
+    options: [{ speciesId: "metapod", name: "metapod", required: 50, condition: null }],
+  });
+  assert.equal(assessCandy("enough", 60, 50)?.evolutionCandy?.available, 60);
+  assert.equal(assessCandy("unknown", null, 50)?.evolutionCandy?.available, null);
+  assert.equal(assessCandy("purified", 11, null, true)?.evolutionCandy?.options[0].required, 11);
+  snapshot.species.caterpie.evolutions.push({ id: "butterfree", candy: 50, condition: "道具" });
+  snapshot.species.butterfree = species("butterfree");
+  const branches = assessCandy("branches", 30, 12)?.evolutionCandy?.options;
+  assert.deepEqual(branches?.map((option) => option.required), [12, 50]);
+  assert.equal(branches?.[1].condition, "道具");
 });
 
 test("粉色多分支進化按鈕的深色剪影可在模擬截圖辨識", async () => {

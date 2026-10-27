@@ -296,19 +296,19 @@ test("清倉結果勾選批次只授權明列個體，拒絕重複與受保護�
   assert.equal((await request("transfers/execute-many", "POST", { pokemonIds: ids })).status, 400);
   store.put("pokemon", second.id, { ...second, locked: false });
   assert.equal((await request("transfers/execute-many", "POST", {
-    pokemonIds: ids, searchExclusions: ["background", "lucky", "shiny", "costume"],
+    pokemonIds: ids, searchExclusions: ["background", "lucky", "shiny", "costume", "shadow"],
   })).status, 400);
   assert.equal((await request("transfers/execute-many", "POST", {
     pokemonIds: ids, searchExclusions: ["background", "background"],
   })).status, 400);
   const response = await request("transfers/execute-many", "POST", {
-    pokemonIds: ids, searchExclusions: ["background", "lucky", "shiny"],
+    pokemonIds: ids, searchExclusions: ["background", "lucky", "shiny", "costume"],
   });
   assert.equal(response.status, 200);
   const batch = (await response.json()) as TransferBatch;
   assert.equal(batch.mode, "bulk");
   assert.equal(batch.status, "approved");
-  assert.deepEqual(batch.searchExclusions, ["background", "lucky", "shiny"]);
+  assert.deepEqual(batch.searchExclusions, ["background", "lucky", "shiny", "costume"]);
   assert.deepEqual(batch.entries.map((entry) => entry.pokemonId), ids);
   assert.equal((await request("transfers/execute-many", "POST", { pokemonIds: ids })).status, 400);
   store.remove("transfer_batches", batch.id);
@@ -417,6 +417,7 @@ test("暫停批次可跳過當前失敗個體並續跑，已送出及結果不�
   assert.equal(response.status, 200);
   const skipped = await response.json() as TransferBatch;
   assert.equal(skipped.status, "approved");
+  assert.equal(skipped.needsBoxReturn, true);
   assert.deepEqual(skipped.entries.map((entry) => entry.status), ["skipped", "pending", "skipped"]);
   assert.match(skipped.entries[0].reason || "", /使用者選擇跳過/);
   assert.match(skipped.entries[2].reason || "", /已不符合放生條件/);
@@ -488,6 +489,45 @@ test("總數未知時須先保存逐隻截圖，再由使用者確認開始解�
   assert.equal(queued.analyzed, 0);
   assert.equal(store.get("pokemon", "capture-only-api"), null);
   store.put("scans", scanId, { ...queued, status: "stopped" });
+});
+test("截圖完成後停止解析可從保存的檢查點繼續，缺少截圖則拒絕", async () => {
+  const stamp = new Date().toISOString();
+  const scanId = "stopped-analysis-api";
+  const scan = {
+    id: scanId,
+    scope: "all" as const,
+    status: "stopped" as const,
+    phase: "analysis" as const,
+    analyzed: 0,
+    stage: "已停止",
+    createdAt: stamp,
+    updatedAt: stamp,
+    scanned: 1,
+    review: 0,
+    expected: 1,
+    sort: null,
+    currentFrame: `${scanId}/top.jpg`,
+    lastFingerprint: "static",
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    error: null,
+    checkpointRequired: false,
+    iphoneUseVersion: null,
+  };
+  store.put("scans", scanId, scan);
+  assert.equal((await request(`scans/${scanId}/control`, "POST", { action: "resume" })).status, 400);
+  store.put("scan_items", "stopped-analysis-item", {
+    id: "stopped-analysis-item", scanId, position: 0,
+    frame: `${scanId}/top.jpg`, appraisalFrame: `${scanId}/iv.jpg`,
+    fingerprint: "static", pokemonId: null, fields: null, issues: [],
+    protectionClear: false, capturedAt: stamp,
+  });
+  const response = await request(`scans/${scanId}/control`, "POST", { action: "resume" });
+  assert.equal(response.status, 200);
+  const resumed = await response.json();
+  assert.equal(resumed.status, "queued");
+  assert.equal(resumed.phase, "analysis");
+  store.put("scans", scanId, { ...resumed, status: "stopped" });
+  store.remove("scan_items", "stopped-analysis-item");
 });
 test("重來會清除未完成掃描及其個體和截圖，保留其他收藏", async () => {
   const stamp = new Date().toISOString();

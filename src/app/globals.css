@@ -816,15 +816,15 @@ main > .iphone-panel {
 }
 .filter-tabs {
   display: flex;
-  gap: 2px;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 2px 4px;
   min-width: 0;
-  overflow-x: auto;
 }
 .filter-tabs button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: -1px;
   padding: 14px 10px 12px;
   border-bottom: 2px solid transparent;
   color: var(--ink-2);
@@ -1092,6 +1092,18 @@ td:last-child > svg {
   text-underline-offset: 2px;
   white-space: normal;
 }
+.candy-readiness {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.4;
+  white-space: normal;
+}
+.candy-readiness.enough { color: var(--green); }
+.candy-readiness.insufficient { color: var(--amber); }
+.candy-readiness.partial { color: var(--violet); }
+.candy-readiness.unknown { color: var(--muted); }
 .reason-cell {
   min-width: 180px;
   max-width: 320px;
@@ -1460,6 +1472,31 @@ body:has(.drawer-backdrop) .toast.toast-stacked {
   align-items: center;
   gap: 16px;
 }
+.drawer-footer .drawer-save-controls {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.drawer-verify {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.drawer-verify input {
+  margin: 0;
+}
+.review-save-error {
+  align-items: flex-start;
+}
+.review-save-error ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
 .review-issues {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -1614,36 +1651,6 @@ body:has(.drawer-backdrop) .toast.toast-stacked {
 .cost-edit > .edit-fields {
   margin: 10px 0 6px;
 }
-.verify-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-top: 20px;
-  padding: 14px 16px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  cursor: pointer;
-}
-.verify-box:has(input:checked) {
-  border-color: color-mix(in oklch, var(--green) 55%, white);
-  background: var(--green-soft);
-}
-.verify-box input {
-  margin-top: 3px;
-}
-.verify-box strong {
-  display: block;
-  font-size: 15px;
-  font-weight: 700;
-}
-.verify-box small {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-2);
-  font-size: 13px;
-}
-
 /* ---------- Analysis ---------- */
 .analysis-content {
   max-width: 760px;

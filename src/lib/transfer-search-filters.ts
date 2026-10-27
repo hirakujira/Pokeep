@@ -3,7 +3,7 @@ export const transferSearchFilters = [
   { id: "background", label: "背卡", term: "背卡" },
   { id: "lucky", label: "亮晶晶", term: "亮晶晶" },
   { id: "shiny", label: "異色", term: "異色" },
-  { id: "costume", label: "活動造型", term: "特殊" },
+  { id: "costume", label: "特殊服裝／活動造型", term: "特殊" },
   { id: "shadow", label: "暗影", term: "暗影" },
   { id: "purified", label: "淨化", term: "淨化" },
   { id: "favorite", label: "我的最愛", term: "我的最愛" },
@@ -14,7 +14,7 @@ export const transferSearchFilters = [
 ] as const;
 
 export type TransferSearchFilter = (typeof transferSearchFilters)[number]["id"];
-export const maxExtraTransferSearchFilters = 2;
+export const maxTransferSearchFilters = 4;
 export const defaultTransferSearchFilters: TransferSearchFilter[] = ["background"];
 
 export function transferSearchQuery(
@@ -22,10 +22,9 @@ export function transferSearchQuery(
 ) {
   if (!Number.isInteger(dex) || dex < 1 || dex > 10000)
     throw new Error("沒有可靠的圖鑑編號，無法搜尋候選");
-  const extras = selectedFilters.filter((filter) => filter !== "background");
-  if (extras.length > maxExtraTransferSearchFilters ||
+  if (selectedFilters.length > maxTransferSearchFilters ||
       new Set(selectedFilters).size !== selectedFilters.length)
-    throw new Error("額外搜尋排除條件最多兩項且不能重複");
+    throw new Error("搜尋排除條件最多四項且不能重複");
   const requested = new Set<string>(selectedFilters);
   const selected = transferSearchFilters.filter((filter) => requested.has(filter.id));
   if (selected.length !== selectedFilters.length)

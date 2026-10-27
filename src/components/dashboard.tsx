@@ -36,6 +36,7 @@ import {
   fieldLabels,
   type Fields,
   type Evidence,
+  type Analysis,
   type Pokemon,
   type Settings,
   type Cost,
@@ -46,7 +47,7 @@ import type { PublicRuntimeConfig } from "@/lib/runtime-config";
 import { resumableTransferIndexes, skippableTransferIndex } from "@/lib/iphone-resume";
 import {
   defaultTransferSearchFilters,
-  maxExtraTransferSearchFilters,
+  maxTransferSearchFilters,
   transferSearchFilters,
   transferSearchQuery,
   type TransferSearchFilter,
@@ -75,7 +76,7 @@ type Catalog = {
   species: { id: string; dex: number; name: string; types: string[] }[];
   moves: { id: string; name: string }[];
 };
-type Tab = "iphone" | "results" | "collection" | "settings";
+type Tab = "iphone" | "results" | "settings";
 type PhoneState = {
   worker: {
     updatedAt: string;
@@ -106,7 +107,6 @@ const empty: State = {
 const tabs = [
   { id: "iphone" as Tab, label: "iPhone 掃描", icon: Smartphone },
   { id: "results" as Tab, label: "清倉結果", icon: ClipboardCheck },
-  { id: "collection" as Tab, label: "收藏庫", icon: FolderHeart },
   { id: "settings" as Tab, label: "設定", icon: Settings2 },
 ];
 const scanStatusLabels: Record<Scan["status"], string> = {
@@ -174,6 +174,37 @@ const displayPokemonName = (name: string, costume: string | null, speciesId?: st
   const localized = localizeSpeciesName(name, speciesId);
   return costume && !localized.includes(costume) ? `${localized}（${costume}）` : localized;
 };
+const reviewPromptsFor = (pokemon: Pokemon) => [...new Set([
+  ...(pokemon.analysis?.category === "review"
+    ? pokemon.analysis.reasons.filter((reason) => !/^(已人工確認|已保留|保留此)/.test(reason))
+    : []),
+  ...pokemon.issues,
+])];
+function evolutionCandySummary(plan: Analysis["evolutionCandy"]) {
+  if (!plan?.options.length) return null;
+  const requirements = plan.options.map((option) => option.required);
+  const minimum = Math.min(...requirements);
+  const maximum = Math.max(...requirements);
+  const available = plan.available;
+  if (available === null) return {
+    tone: "unknown",
+    label: minimum === maximum
+      ? `糖果持有量未知（需要 ${minimum}）`
+      : `糖果持有量未知（需要 ${minimum}–${maximum}）`,
+  };
+  if (available >= maximum) return {
+    tone: "enough",
+    label: `糖果足夠（持有 ${available}／${minimum === maximum ? "需要" : "最高需"} ${maximum}）`,
+  };
+  if (available < minimum) return {
+    tone: "insufficient",
+    label: `糖果不足（持有 ${available}／${minimum === maximum ? "需要" : "至少需"} ${minimum}）`,
+  };
+  return {
+    tone: "partial",
+    label: `部分分支糖果足夠（持有 ${available}／需要 ${minimum}–${maximum}）`,
+  };
+}
 async function api<T = unknown>(
   url: string,
   method = "GET",
@@ -570,12 +601,9 @@ export default function Dashboard() {
                 return (
                   <button
                     key={category}
-                    className={`stat-card ${category} ${tab === "results" && filter === category ? "active" : ""}`}
-                    aria-pressed={tab === "results" && filter === category}
-                    onClick={() => {
-                      setTab("results");
-                      setFilter(category);
-                    }}
+                    className={`stat-card ${category} ${filter === category ? "active" : ""}`}
+                    aria-pressed={filter === category}
+                    onClick={() => setFilter(category)}
                   >
                     <div className="stat-top">
                       <Icon size={16} />
@@ -763,6 +791,13 @@ export default function Dashboard() {
                   {phoneState.scan.error && (
                     <p className="job-error">{phoneState.scan.error}</p>
                   )}
+                  {phoneState.scan.phase === "analysis" && (
+                    <p className="caption">
+                      {phoneState.scan.scanned} 隻截圖已保存，還有{" "}
+                      {Math.max(0, phoneState.scan.scanned - (phoneState.scan.analyzed || 0))}
+                      {" "}隻待解析；解析完成後會自動標為完成，不需操作手機。
+                    </p>
+                  )}
                   {phoneState.scan.currentFrame && (
                     <img
                       className="iphone-frame"
@@ -788,7 +823,8 @@ export default function Dashboard() {
                         暫停
                       </button>
                     )}
-                    {phoneState.scan.status === "paused" && (
+                    {(phoneState.scan.status === "paused" ||
+                      (phoneState.scan.status === "stopped" && phoneState.scan.phase === "analysis")) && (
                       <button
                         className="button secondary"
                         disabled={!!busy}
@@ -882,9 +918,9 @@ export default function Dashboard() {
 
             </div>
           )}
-          {(tab === "results" || tab === "collection") && (
+          {tab === "results" && (
             <>
-              {tab === "results" && batch && (
+              {batch && (
                 <section className="panel iphone-panel">
                   <div className="panel-heading">
                     <div>
@@ -903,7 +939,11 @@ export default function Dashboard() {
                   </p>
                   {batch.error && <p className="job-error">{batch.error}</p>}
                   {batchResumableCount > 0 && (
-                    <p className="muted">先在手機返回寶可夢盒子列表，再按「繼續」；已送出的個體不會重送。</p>
+                    <p className="muted">
+                      {batchSkippableIndex !== null
+                        ? "按「跳過這隻並繼續」會先按 X 返回列表，再搜尋下一隻；若要重試目前個體，請先手動返回列表。"
+                        : "先在手機返回寶可夢盒子列表，再按「繼續」；已送出的個體不會重送。"}
+                    </p>
                   )}
                   {batchSkippableIndex !== null && (
                     <p className="muted">
@@ -974,7 +1014,7 @@ export default function Dashboard() {
                   )}
                 </section>
               )}
-              {tab === "results" && phoneState?.resumableBatches?.some((row) => row.id !== batch?.id) && (
+              {phoneState?.resumableBatches?.some((row) => row.id !== batch?.id) && (
                 <section className="panel iphone-panel">
                   <div className="panel-heading">
                     <div>
@@ -1079,72 +1119,66 @@ export default function Dashboard() {
                     </a>
                   </div>
                 </div>
-                {tab === "results" && (
-                  <div className="transfer-search-options">
-                    <strong>放生時手機搜尋排除</strong>
-                    <div className="transfer-search-checks">
-                      {transferSearchFilters.map((option) => (
-                        <label key={option.id} className="checkbox-label">
-                          <input
-                            type="checkbox"
-                            checked={searchExclusions.includes(option.id)}
-                            disabled={!!busy || ["approved", "running"].includes(batch?.status || "") ||
-                              (option.id !== "background" && !searchExclusions.includes(option.id) &&
-                                searchExclusions.filter((id) => id !== "background").length >= maxExtraTransferSearchFilters)}
-                            onChange={() => toggleSearchExclusion(option.id)}
-                          />
-                          {option.label}
-                        </label>
-                      ))}
-                    </div>
-                    <small>額外最多選兩項，避免手機搜尋字串超出可核對範圍。未勾背卡時仍會另行檢查並跳過背卡個體。</small>
-                    <code>範例：{transferSearchQuery(25, searchExclusions)}</code>
+                <div className="transfer-search-options">
+                  <strong>放生時手機搜尋排除</strong>
+                  <div className="transfer-search-checks">
+                    {transferSearchFilters.map((option) => (
+                      <label key={option.id} className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={searchExclusions.includes(option.id)}
+                          disabled={!!busy || ["approved", "running"].includes(batch?.status || "") ||
+                            (!searchExclusions.includes(option.id) &&
+                              searchExclusions.length >= maxTransferSearchFilters)}
+                          onChange={() => toggleSearchExclusion(option.id)}
+                        />
+                        {option.label}
+                      </label>
+                    ))}
                   </div>
-                )}
-                {tab === "results" && (
-                  <div className="transfer-selection-bar">
-                    <span>
-                      已勾選 <strong>{activeCheckedTransfers.length}</strong> 隻
-                    </span>
-                    <button
-                      className="button small secondary"
-                      disabled={!activeCheckedTransfers.length || !!busy}
-                      onClick={() => setCheckedTransfers([])}
-                    >
-                      清除勾選
-                    </button>
-                    <button
-                      className="button small danger"
-                      disabled={
-                        !activeCheckedTransfers.length || !!busy ||
-                        ["approved", "running"].includes(phoneState?.batch?.status || "")
-                      }
-                      onClick={() => startSelectedTransfers(activeCheckedTransfers)}
-                    >
-                      放生勾選的 {activeCheckedTransfers.length} 隻
-                    </button>
-                  </div>
-                )}
+                  <small>最多勾選四種。勾選「背卡」會排除背卡，勾選「特殊服裝／活動造型」會排除特殊服裝；手機只用勾選條件搜尋一次。查詢若無法在畫面上完整核對，放生會暫停。</small>
+                  <code>範例：{transferSearchQuery(25, searchExclusions)}</code>
+                </div>
+                <div className="transfer-selection-bar">
+                  <span>
+                    已勾選 <strong>{activeCheckedTransfers.length}</strong> 隻
+                  </span>
+                  <button
+                    className="button small secondary"
+                    disabled={!activeCheckedTransfers.length || !!busy}
+                    onClick={() => setCheckedTransfers([])}
+                  >
+                    清除勾選
+                  </button>
+                  <button
+                    className="button small danger"
+                    disabled={
+                      !activeCheckedTransfers.length || !!busy ||
+                      ["approved", "running"].includes(phoneState?.batch?.status || "")
+                    }
+                    onClick={() => startSelectedTransfers(activeCheckedTransfers)}
+                  >
+                    放生勾選的 {activeCheckedTransfers.length} 隻
+                  </button>
+                </div>
                 {list.length ? (
                   <div className="table-scroll">
                     <table>
                       <thead>
                         <tr>
-                          {tab === "results" && (
-                            <th className="transfer-check-cell">
-                              <input
-                                type="checkbox"
-                                aria-label="勾選目前顯示的可放生寶可夢"
-                                checked={allVisibleChecked}
-                                disabled={!visibleTransferIds.length}
-                                onChange={() => setCheckedTransfers((current) =>
-                                  allVisibleChecked
-                                    ? current.filter((id) => !visibleTransferIds.includes(id))
-                                    : [...new Set([...current, ...visibleTransferIds])],
-                                )}
-                              />
-                            </th>
-                          )}
+                          <th className="transfer-check-cell">
+                            <input
+                              type="checkbox"
+                              aria-label="勾選目前顯示的可放生寶可夢"
+                              checked={allVisibleChecked}
+                              disabled={!visibleTransferIds.length}
+                              onChange={() => setCheckedTransfers((current) =>
+                                allVisibleChecked
+                                  ? current.filter((id) => !visibleTransferIds.includes(id))
+                                  : [...new Set([...current, ...visibleTransferIds])],
+                              )}
+                            />
+                          </th>
                           <th>寶可夢</th>
                           <th>CP / IV</th>
                           <th>建議分類</th>
@@ -1161,6 +1195,9 @@ export default function Dashboard() {
                             f.costume,
                             f.speciesId,
                           );
+                          const candySummary = p.analysis?.category === "evolve"
+                            ? evolutionCandySummary(p.analysis.evolutionCandy)
+                            : null;
                           const retainedEvolution = p.analysis?.category === "transfer" && f.speciesId
                             ? (p.analysis.comparedWith
                                 .map((id) => pokemonById.get(id))
@@ -1182,20 +1219,18 @@ export default function Dashboard() {
                                 if (e.key === "Enter") setSelected(p.id);
                               }}
                             >
-                              {tab === "results" && (
-                                <td className="transfer-check-cell">
-                                  {p.owned && p.analysis?.category === "transfer" && (
-                                    <input
-                                      type="checkbox"
-                                      aria-label={`勾選 ${name} CP ${f.cp ?? "未知"}`}
-                                      checked={activeCheckedTransfers.includes(p.id)}
-                                      onClick={(event) => event.stopPropagation()}
-                                      onKeyDown={(event) => event.stopPropagation()}
-                                      onChange={() => toggleTransfer(p.id)}
-                                    />
-                                  )}
-                                </td>
-                              )}
+                              <td className="transfer-check-cell">
+                                {p.owned && p.analysis?.category === "transfer" && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`勾選 ${name} CP ${f.cp ?? "未知"}`}
+                                    checked={activeCheckedTransfers.includes(p.id)}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                    onChange={() => toggleTransfer(p.id)}
+                                  />
+                                )}
+                              </td>
                               <td>
                                 <div className="pokemon-cell">
                                   <PokemonSprite pokemon={p} />
@@ -1238,6 +1273,11 @@ export default function Dashboard() {
                                 <Status
                                   category={p.analysis?.category || "review"}
                                 />
+                                {candySummary && (
+                                  <span className={`candy-readiness ${candySummary.tone}`}>
+                                    {candySummary.label}
+                                  </span>
+                                )}
                                 {retainedEvolution && (
                                   <button
                                     className="retained-evolution-link"
@@ -1414,11 +1454,13 @@ export default function Dashboard() {
           catalog={catalog}
           error={error}
           onClose={closeDrawer}
-          onSave={async (data) => {
+          onSave={async (data, announce = true) => {
+            let updated: Pokemon | null = null;
             await act("save", async () => {
-              await api(`pokemon/${chosen.id}`, "PATCH", data);
-              notify("已儲存並重新評估");
+              updated = await api<Pokemon>(`pokemon/${chosen.id}`, "PATCH", data);
             });
+            if (updated && announce) notify("已儲存並重新評估");
+            return updated;
           }}
           onMerge={async (source) => {
             await act("merge", async () => {
@@ -1588,7 +1630,7 @@ function SettingsView({
             void onAction("data", async () => {
               await api("data/update", "POST");
               await onRefreshCatalog();
-              onToast("遊戲資料已更新，收藏庫已重新評估");
+              onToast("遊戲資料已更新，已重新評估清倉建議");
             })
           }
         >
@@ -1765,7 +1807,7 @@ function PokemonDrawer({
   catalog: Catalog;
   error: string;
   onClose: () => void;
-  onSave: (data: unknown) => Promise<void>;
+  onSave: (data: unknown, announce?: boolean) => Promise<Pokemon | null>;
   onMerge: (id: string) => Promise<void>;
   busy: boolean;
 }) {
@@ -1781,9 +1823,11 @@ function PokemonDrawer({
       p.maxStatus ?? null,
     ),
     [dismiss, setDismiss] = useState(false),
+    [saveReviewReasons, setSaveReviewReasons] = useState<string[] | null>(null),
     [proofError, setProofError] = useState(false);
   const closeButton = useRef<HTMLButtonElement>(null),
-    panelRef = useRef<HTMLElement>(null);
+    panelRef = useRef<HTMLElement>(null),
+    scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setFields(effective(p));
     setSpeciesQuery("");
@@ -1828,6 +1872,8 @@ function PokemonDrawer({
   const a = p.analysis,
     activeSource = p.sources[Math.min(source, p.sources.length - 1)],
     moveNames = Object.fromEntries(catalog.moves.map((move) => [move.id, move.name]));
+  const candySummary = evolutionCandySummary(a?.evolutionCandy);
+  const reviewPrompts = reviewPromptsFor(p);
   const changes = Object.fromEntries(
     (Object.keys(fields) as (keyof Fields)[])
       .filter((key) => fields[key] !== effective(p)[key])
@@ -2010,24 +2056,37 @@ function PokemonDrawer({
             </button>
           ))}
         </div>
-        <div className="drawer-scroll">
+        <div ref={scrollRef} className="drawer-scroll">
           {error && (
             <div className="alert error" role="alert">
               <CircleHelp size={16} />
               <span>{error}</span>
             </div>
           )}
+          {section === "review" && saveReviewReasons && (
+            <div className="alert error review-save-error" role="alert">
+              <CircleHelp size={16} />
+              <div>
+                <strong>已儲存，但仍無法判定。請確認：</strong>
+                <ul>
+                  {saveReviewReasons.map((reason, i) => (
+                    <li key={i}>{localizeSpeciesName(localizeMoveText(reason, moveNames))}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
           {section === "review" && (
             <>
-              {p.issues.length > 0 && (
+              {!saveReviewReasons && reviewPrompts.length > 0 && (
                 <details className="review-issues" open>
                   <summary>
                     <CircleHelp size={15} />
-                    需要你確認的資訊（{p.issues.length}）
+                    請對照來源畫面確認（{reviewPrompts.length}）
                   </summary>
                   <ul>
-                    {p.issues.map((issue, i) => (
-                      <li key={i}>{issue}</li>
+                    {reviewPrompts.map((reason, i) => (
+                      <li key={i}>{localizeSpeciesName(localizeMoveText(reason, moveNames))}</li>
                     ))}
                   </ul>
                 </details>
@@ -2204,19 +2263,6 @@ function PokemonDrawer({
                   </datalist>
                 </div>
               </div>
-              <label className="verify-box">
-                <input
-                  type="checkbox"
-                  checked={verified}
-                  onChange={(e) => setVerified(e.target.checked)}
-                />
-                <span>
-                  <strong>我已核對來源畫面與上述資料</strong>
-                  <small>
-                    未知欄位保持空白；缺少必要資料時仍會列為待確認。
-                  </small>
-                </span>
-              </label>
             </>
           )}
           {section === "analysis" && (
@@ -2241,6 +2287,26 @@ function PokemonDrawer({
                   </p>
                 ))}
               </div>
+              {a?.category === "evolve" && a.evolutionCandy && (
+                <section className="analysis-section">
+                  <h3>進化糖果</h3>
+                  {candySummary && (
+                    <p className={`candy-readiness ${candySummary.tone}`}>{candySummary.label}</p>
+                  )}
+                  {a.evolutionCandy.options.map((option) => (
+                    <p key={option.speciesId}>
+                      {localizeSpeciesName(option.name, option.speciesId)}：需要 {option.required} 糖果
+                      {a.evolutionCandy?.available === null
+                        ? "；持有量未知"
+                        : a.evolutionCandy!.available >= option.required
+                          ? "；糖果足夠"
+                          : `；還差 ${option.required - a.evolutionCandy!.available} 糖果`}
+                      {option.condition ? `；其他條件：${option.condition}` : ""}
+                    </p>
+                  ))}
+                  <p className="caption">糖果足夠只表示數量達標；進化道具與其他條件仍須在遊戲中確認。</p>
+                </section>
+              )}
               {a?.actions.length ? (
                 <section className="analysis-section">
                   <h3>
@@ -2479,26 +2545,49 @@ function PokemonDrawer({
             </button>
           </div>
           {section === "review" ? (
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() =>
-                void onSave({
-                  fields: changes,
-                  verified,
-                  evolutionSilhouette,
-                  maxStatus,
-                  dismissCandidates: dismiss,
-                })
-              }
-            >
-              {busy ? (
-                <LoaderCircle size={15} className="spin" />
-              ) : (
-                <Check size={15} />
-              )}
-              儲存並重新評估
-            </button>
+            <div className="drawer-save-controls">
+              <label className="drawer-verify">
+                <input
+                  type="checkbox"
+                  checked={verified}
+                  disabled={busy}
+                  onChange={(e) => setVerified(e.target.checked)}
+                />
+                我已核對來源畫面與上述資料
+              </label>
+              <button
+                className="button primary"
+                disabled={busy}
+                onClick={() => {
+                  void (async () => {
+                    const updated = await onSave({
+                      fields: changes,
+                      verified,
+                      evolutionSilhouette,
+                      maxStatus,
+                      dismissCandidates: dismiss,
+                    }, false);
+                    if (!updated) return;
+                    if (updated.analysis && updated.analysis.category !== "review") {
+                      onClose();
+                      return;
+                    }
+                    const missing = reviewPromptsFor(updated);
+                    setSaveReviewReasons(missing.length ? missing : [
+                      "資料仍無法可靠分類，請確認物種、CP、HP、IV 與特殊狀態",
+                    ]);
+                    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                  })();
+                }}
+              >
+                {busy ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <Check size={15} />
+                )}
+                儲存並重新評估
+              </button>
+            </div>
           ) : (
             <button
               className="button secondary"

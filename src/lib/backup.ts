@@ -22,6 +22,7 @@ import {
 } from "./types";
 import type { Scan, ScanItem, TransferBatch } from "./iphone-types";
 import { reevaluate } from "./evaluate";
+import { maxTransferSearchFilters } from "./transfer-search-filters";
 
 export const validFrame = (frame: string) =>
   /^[a-zA-Z0-9-]{1,80}\/[a-zA-Z0-9_-]{1,140}\.jpg$/.test(frame);
@@ -164,8 +165,9 @@ const transferBatchSchema = z.object({
   searchExclusions: z.array(z.enum([
     "background", "lucky", "shiny", "costume", "shadow", "purified",
     "favorite", "legendary", "mythical", "ultrabeast", "perfect",
-  ])).max(3).optional(),
+  ])).max(maxTransferSearchFilters).optional(),
   selectedPokemonId: z.string().nullable().optional(),
+  needsBoxReturn: z.boolean().optional(),
   signature: z.string(),
   entries: z.array(
     z.object({

@@ -29,7 +29,6 @@ import {
   assertUniqueDexCp,
   backgroundQuery,
   backgroundQueryMatches,
-  backgroundSearchDecision,
   collectionSearchState,
   cpCandidates,
   croppedBackgroundTextCompatible,
@@ -112,6 +111,38 @@ export async function settleAfterSubmitted(
   return observeGameForeground(phone, await observe(phone), wait);
 }
 
+/** A skipped detail may still be open. Leave it before searching the next entry. */
+export async function returnToBoxAfterSkip(
+  phone: IphoneMcp,
+  first: Awaited<ReturnType<typeof observe>>,
+  readLines: (path: string) => Promise<Awaited<ReturnType<typeof readLocalOcr>>[number]> =
+    async (path) => (await readLocalOcr([path]))[0],
+) {
+  let current = await observeGameForeground(phone, first);
+  const inBox = async (screen: typeof current) => {
+    if (!screen.image?.path) throw new Error("跳過後手機畫面沒有可讀截圖");
+    return collectionSearchState(await readLines(screen.image.path)) !== null;
+  };
+  if (await inBox(current)) return current;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await tapFast(phone, current, transferPoint.backToBox);
+      break;
+    } catch (error) {
+      const failure = error as Error & { code?: string; uncertain?: boolean };
+      if (attempt !== 0 || failure.code !== "stale_observation" ||
+          failure.uncertain !== false) throw error;
+      current = await observeGameForeground(phone, await observe(phone));
+      if (await inBox(current)) return current;
+    }
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    current = await observeGameForeground(phone, await observe(phone));
+    if (await inBox(current)) return current;
+  }
+  throw new Error("跳過後按 X 未回到寶可夢盒子列表；請查看手機畫面後再繼續");
+}
+
 async function waitForSearchScreen(phone: IphoneMcp) {
   await observeGameForeground(phone, await observe(phone));
 }
@@ -130,9 +161,10 @@ export async function confirmNonBackgroundQuery(
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) return false;
   const region = {
-    left: Math.round(metadata.width * (extras.length ? 0.2 : 0.22)),
+    // Include the first digit of short dex numbers. The magnifier may OCR as Q.
+    left: Math.round(metadata.width * 0.13),
     top: Math.round(metadata.height * 0.155),
-    width: Math.round(metadata.width * (extras.length ? 0.67 : 0.55)),
+    width: Math.round(metadata.width * 0.76),
     height: Math.round(metadata.height * 0.052),
   };
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), "pokekeep-query-"));
@@ -160,14 +192,25 @@ async function submitSearch(
   phone: IphoneMcp, dex: number, background: boolean | "exclude-background",
   extras: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
 ) {
-  const screen = await observeGameForeground(phone, await observe(phone));
-  if (!screen.image?.path) throw new Error("搜尋輸入後沒有可讀畫面");
-  const [lines] = await readLocalOcr([screen.image.path]);
-  const matches = background === "exclude-background"
-    ? await confirmNonBackgroundQuery(screen.image.path, lines, dex, extras)
-    : background ? backgroundQueryMatches(lines, dex) : searchQueryMatches(lines, dex);
-  if (!matches) throw new Error("無法確認搜尋欄包含完整圖鑑編號與所選排除條件，尚未送出搜尋");
-  await tapFast(phone, screen, transferPoint.confirmSearch);
+  let observed = "搜尋欄未讀到文字";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 150));
+    const screen = await observeGameForeground(phone, await observe(phone));
+    if (!screen.image?.path) throw new Error("搜尋輸入後沒有可讀畫面");
+    const [lines] = await readLocalOcr([screen.image.path]);
+    observed = lines.find((line) => line.x > 0.1 && line.x < 0.88 &&
+      line.y > 0.76 && line.y < 0.86)?.text || "搜尋欄未讀到文字";
+    const matches = background === "exclude-background"
+      ? await confirmNonBackgroundQuery(screen.image.path, lines, dex, extras)
+      : background ? backgroundQueryMatches(lines, dex) : searchQueryMatches(lines, dex);
+    if (matches) {
+      await tapFast(phone, screen, transferPoint.confirmSearch);
+      return;
+    }
+  }
+  throw new Error(
+    `無法確認搜尋欄；預期「${background === "exclude-background" ? transferSearchQuery(dex, extras) : background ? backgroundQuery(dex) : dex}」，畫面辨識為「${observed}」，尚未送出搜尋`,
+  );
 }
 
 function setEntry(
@@ -202,16 +245,11 @@ async function findCandidateByDexCp(
     throw new Error("請先在寶可夢盒子列表開始逐隻放生");
   let result = current;
   let lines = initialLines;
-  if (!extras.includes("background")) {
-    result = await confirmTargetHasNoBackground(phone, current, searchState, dex, cp);
-    if (!result.image?.path) throw new Error("背卡檢查沒有可讀截圖");
-    [lines] = await readLocalOcr([result.image.path]);
-  }
   if (!result.image?.path) throw new Error("搜尋畫面沒有可讀截圖");
   const currentSearchState = collectionSearchState(lines);
   if (!currentSearchState)
-    throw new Error("背卡檢查後無法確認仍在寶可夢盒子，尚未放生");
-  if (!extras.includes("background") || !reuseSearch || currentSearchState !== "active" ||
+    throw new Error("無法確認仍在寶可夢盒子，尚未放生");
+  if (!reuseSearch || currentSearchState !== "active" ||
       !await confirmNonBackgroundQuery(result.image.path, lines, dex, extras)) {
     if (currentSearchState === "active")
       await tapFast(phone, result, transferPoint.clearSearch);
@@ -270,51 +308,6 @@ async function findCandidateByDexCp(
     [lines] = await readLocalOcr([result.image.path]);
   }
   throw new SkippedCandidate("無法確認目標位於搜尋結果，已跳過且未放生");
-}
-
-/** An unchecked !背卡 changes the query, never the background protection. */
-async function confirmTargetHasNoBackground(
-  phone: IphoneMcp,
-  current: Awaited<ReturnType<typeof observe>>,
-  searchState: "empty" | "active",
-  dex: number,
-  cp: number,
-) {
-  if (searchState === "active")
-    await tapFast(phone, current, transferPoint.clearSearch);
-  await tapFast(phone, current, transferPoint.search);
-  await typeBackgroundSearch(phone, dex);
-  let result = await observe(phone);
-  const seen = new Set<string>();
-  let previous = "";
-  for (let attempt = 0; attempt < 20; attempt++) {
-    if (!result.image?.path) throw new Error("背卡搜尋沒有可讀截圖");
-    const [lines] = await readLocalOcr([result.image.path]);
-    const decision = backgroundSearchDecision(lines, dex, cp);
-    if (decision === "protected")
-      throw new SkippedCandidate("同圖鑑編號與 CP 的寶可夢有背卡，已跳過且未放生");
-    if (decision === "clear") return result;
-    if (!backgroundQueryMatches(lines, dex))
-      throw new Error("無法確認背卡檢查的搜尋欄，尚未放生");
-    const count = searchResultCount(lines);
-    if (count === null) throw new Error("無法讀取背卡搜尋結果數量，尚未放生");
-    const visible = cpCandidates(lines);
-    const signature = visible.map((candidate) => `${candidate.cp}:${candidate.x}:${candidate.y}`).join("|");
-    if (!signature || signature === previous)
-      throw new Error("背卡搜尋無法確認所有結果，尚未放生");
-    previous = signature;
-    for (const candidate of visible)
-      seen.add(`${candidate.cp}:${candidate.x}:${candidate.y}`);
-    if (seen.size >= count) return result;
-    const swiped = await phone.call<{ observation?: Awaited<ReturnType<typeof observe>> }>(
-      "swipe", {
-        direction: "up", observation_id: result.observation_id,
-        verify: false, observe: "screenshot",
-      },
-    );
-    result = swiped.observation?.image?.path ? swiped.observation : await observe(phone);
-  }
-  throw new Error("背卡搜尋結果過多，無法確認目標沒有背卡，尚未放生");
 }
 
 function completeBoxIds() {
@@ -443,6 +436,13 @@ export async function runTransferBatch(
   let current = await ensureReady(phone);
   if (!current.image) current = await observe(phone);
   current = await observeGameForeground(phone, current);
+  if (batch.needsBoxReturn) {
+    current = await returnToBoxAfterSkip(phone, current);
+    const latest = get<TransferBatch>("transfer_batches", batch.id)!;
+    if (latest.status !== "running") return;
+    batch = { ...latest, needsBoxReturn: false, updatedAt: now() };
+    put("transfer_batches", batch.id, batch);
+  }
   let reusableDex: number | null = null;
   for (let index = 0; index < batch.entries.length; index++) {
     batch = get<TransferBatch>("transfer_batches", batch.id)!;

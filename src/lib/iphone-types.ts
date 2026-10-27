@@ -99,6 +99,7 @@ export type TransferBatch = {
   mode?: "single" | "bulk";
   searchExclusions?: TransferSearchFilter[];
   selectedPokemonId?: string | null;
+  needsBoxReturn?: boolean;
   signature: string;
   entries: TransferEntry[];
   error: string | null;

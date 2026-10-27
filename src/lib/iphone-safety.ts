@@ -242,6 +242,9 @@ export function transferExclusion(
     )
   ) return "傳說、幻之或究極異獸";
   if (p.analysis?.category !== "transfer") return "目前不屬於可放生建議";
+  if (p.evolutionSilhouette === true &&
+      !p.analysis.reasons.includes("同類已有更適合進化的個體"))
+    return "未登錄進化剪影尚無已保留的進化代表";
   if (p.maxStatus == null) return "極巨化狀態尚未確認";
   if (!species || p.analysis?.currentLevels.length !== 1)
     return "缺少唯一的目前等級或有效遊戲資料";

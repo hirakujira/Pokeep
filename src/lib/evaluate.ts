@@ -350,6 +350,7 @@ function baseAnalysis(p: Pokemon, snapshot: Snapshot | null): Analysis {
     raids: [],
     currentLevels: [],
     actions: [],
+    evolutionCandy: null,
     purification: null,
     comparedWith: [],
     snapshot: snapshot?.version || null,
@@ -662,7 +663,7 @@ export function evaluateCollection(
         rows.map((r) => r.p),
       );
   }
-  type EvolutionOption = { target: Species; condition: string | null };
+  type EvolutionOption = { target: Species; candy: number; condition: string | null };
   const evolutionGroups = new Map<string, { p: Pokemon; options: EvolutionOption[] }[]>();
   const evolutionNeedsReview = new Set<string>();
   for (const p of living) {
@@ -675,15 +676,14 @@ export function evaluateCollection(
       [f.cp, f.ivAtk, f.ivDef, f.ivSta, f.shadow, f.purified, f.shiny].some(
         (value) => value === null,
       ) ||
-      p.evolutionSilhouette !== true || f.costume !== null ||
-      !completeBoxIds?.has(p.id)
+      p.evolutionSilhouette !== true || f.costume !== null
     ) continue;
     const evolutions = snapshot.species[f.speciesId]?.evolutions.filter(
       (evolution) => !evolution.gender || evolution.gender === f.gender,
     ) || [];
     const options = evolutions.flatMap((evolution) => {
       const target = snapshot.species[evolution.id];
-      return target ? [{ target, condition: evolution.condition }] : [];
+      return target ? [{ target, candy: evolution.candy, condition: evolution.condition }] : [];
     });
     if (!options.length || options.length !== evolutions.length) {
       evolutionNeedsReview.add(p.id);
@@ -691,7 +691,7 @@ export function evaluateCollection(
     }
     const missing = options.filter(({ target }) =>
       !living.some((peer) =>
-        completeBoxIds.has(peer.id) && effective(peer).speciesId === target.id,
+        effective(peer).speciesId === target.id,
       ),
     );
     if (missing.length !== options.length) {
@@ -700,7 +700,9 @@ export function evaluateCollection(
     }
     // The screenshot proves at least one branch is unregistered, but cannot
     // pair each silhouette with a named branch. Only infer multi-branch
-    // evolution automatically when none of its immediate forms is in the box.
+    // evolution automatically when none of its immediate forms is in the
+    // imported, still-owned collection. This recommendation does not authorize
+    // a transfer, even if the phone scan stopped before covering the whole box.
     const key = `${f.speciesId}/${options.map(({ target }) => target.id).sort().join(",")}`;
     evolutionGroups.set(key, [
       ...(evolutionGroups.get(key) || []),
@@ -710,7 +712,7 @@ export function evaluateCollection(
   const evolutionWinners = new Map<string, EvolutionOption[]>();
   const evolutionPeers = new Map<string, string>();
   const unresolvedMissingEvolution = (pokemon: Pokemon) => {
-    if (pokemon.evolutionSilhouette != null || !completeBoxIds?.has(pokemon.id) || !snapshot)
+    if (pokemon.evolutionSilhouette != null || !snapshot)
       return false;
     const fields = effective(pokemon);
     const species = fields.speciesId ? snapshot.species[fields.speciesId] : null;
@@ -718,7 +720,7 @@ export function evaluateCollection(
       (!evolution.gender || evolution.gender === fields.gender) &&
       snapshot.species[evolution.id] &&
       !living.some((peer) =>
-        completeBoxIds.has(peer.id) && effective(peer).speciesId === evolution.id,
+        effective(peer).speciesId === evolution.id,
       ),
     ));
   };
@@ -906,9 +908,26 @@ export function evaluateCollection(
       a.reasons.unshift(reviewReason(p, f, a));
     } else if (evolution) {
       a.category = "evolve";
+      const catalogCosts = evolution.map((option) =>
+        f.purified ? Math.ceil(option.candy * 0.9) : option.candy,
+      );
+      const useScreenCost = f.evolutionCandy !== null &&
+        new Set(catalogCosts).size === 1;
+      a.evolutionCandy = {
+        available: f.candy,
+        options: evolution.map((option, index) => ({
+          speciesId: option.target.id,
+          name: option.target.name,
+          required: useScreenCost ? f.evolutionCandy! : catalogCosts[index],
+          condition: option.condition,
+        })),
+      };
+      const coverage = completeBoxIds?.has(p.id)
+        ? "最近一次完整盒子掃描"
+        : "已匯入且仍持有的收藏（盒子掃描未完成）";
       if (evolution.length === 1) {
         a.reasons.unshift(
-          `進化按鈕顯示未登錄剪影；最近一次完整盒子掃描沒有 ${evolution[0].target.name}；同類中優先進化這隻`,
+          `進化按鈕顯示未登錄剪影；${coverage}沒有 ${evolution[0].target.name}；同類中優先進化這隻`,
         );
         a.actions.unshift(
           `可考慮進化為 ${evolution[0].target.name}${evolution[0].condition ? `；條件：${evolution[0].condition}` : ""}。`,
@@ -916,16 +935,19 @@ export function evaluateCollection(
       } else {
         const names = evolution.map(({ target }) => target.name).join("、");
         a.reasons.unshift(
-          `進化按鈕顯示未登錄剪影；最近一次完整盒子掃描沒有下一階分支（${names}）；同類中優先進化這隻`,
+          `進化按鈕顯示未登錄剪影；${coverage}沒有下一階分支（${names}）；同類中優先進化這隻`,
         );
         a.actions.unshift(`可考慮進化為 ${names}；請在遊戲確認分支與進化道具。`);
       }
     } else if (evolutionNeedsReview.has(p.id)) {
       a.category = "review";
       a.reasons.unshift("有未登錄進化剪影，但多分支與收藏狀態無法唯一對應；請人工核對");
+    } else if (p.evolutionSilhouette === true && !evolutionPeers.has(p.id)) {
+      a.category = "review";
+      a.reasons.unshift("進化按鈕顯示未登錄剪影，但已匯入收藏中有下一階進化型，或進化目標無法確認；核對前不列入可放生");
     } else if (unresolvedMissingEvolution(p)) {
       a.category = "review";
-      a.reasons.unshift("盒內缺少下一階進化型，但進化剪影尚未判定；確認前不列入可放生");
+      a.reasons.unshift("已匯入收藏缺少下一階進化型，但進化剪影尚未判定；確認前不列入可放生");
     } else if (a.warnings.some((w) => w.includes("不完整") || w.includes("不適用"))) {
       a.category = "review";
       a.reasons.unshift(reviewReason(p, f, a));

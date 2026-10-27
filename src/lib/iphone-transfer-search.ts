@@ -67,10 +67,16 @@ export function transferQueryMatches(
   const search = lines.find((line) =>
     line.x > 0.1 && line.x < 0.65 && line.y > 0.78 && line.y < 0.85,
   );
-  const text = search?.text.normalize("NFKC").toLowerCase().replace(/\s/g, "") || "";
+  return search ? transferQueryTextMatches(search.text, dex, selected) : false;
+}
+
+function transferQueryTextMatches(
+  value: string, dex: number, selected: readonly TransferSearchFilter[],
+) {
+  const text = value.normalize("NFKC").toLowerCase().replace(/\s/g, "");
   const query = transferSearchQuery(dex, selected).toLowerCase();
-  const prefix = text.slice(0, -query.length);
-  return text.endsWith(query) && ["", "q", "⌕", "🔍"].includes(prefix);
+  if (!text.endsWith(query)) return false;
+  return ["", "q", "⌕", "🔍"].includes(text.slice(0, -query.length));
 }
 
 export function nonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
@@ -80,9 +86,8 @@ export function nonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
 export function croppedTransferQueryMatches(
   lines: OcrLine[], dex: number, selected: readonly TransferSearchFilter[],
 ) {
-  const visible = lines.map((line) => line.text.normalize("NFKC").replace(/\s/g, ""))
-    .filter(Boolean);
-  return visible.length === 1 && visible[0] === transferSearchQuery(dex, selected);
+  const visible = lines.filter((line) => line.text.trim());
+  return visible.length === 1 && transferQueryTextMatches(visible[0].text, dex, selected);
 }
 
 /** Cropped search text has no magnifier prefix or position in the full frame. */

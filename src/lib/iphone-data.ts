@@ -287,6 +287,7 @@ export function skipCurrentTransferEntry(batchId: string) {
       entries,
       status: "approved",
       selectedPokemonId: null,
+      needsBoxReturn: true,
       approvedAt: now(),
       updatedAt: now(),
       error: null,

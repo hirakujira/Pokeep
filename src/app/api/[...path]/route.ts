@@ -49,7 +49,7 @@ import { moveName } from "@/lib/move-names";
 import { publicRuntimeConfig, saveRuntimeConfig } from "@/lib/runtime-config";
 import { clearPokemonData } from "@/lib/clear-pokemon-data";
 import { scanTiming } from "@/lib/scan-timing";
-import { defaultTransferSearchFilters, transferSearchQuery } from "@/lib/transfer-search-filters";
+import { defaultTransferSearchFilters, maxTransferSearchFilters, transferSearchQuery } from "@/lib/transfer-search-filters";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -197,6 +197,18 @@ async function handle(req: NextRequest, ctx: Context) {
         return json(
           updateScan(scan.id, { status: "stopped", stage: "已停止" }),
         );
+      if (action === "resume" && scan.status === "stopped" && scan.phase === "analysis") {
+        if (activeScan() || activeBatch()) throw new Error("已有手機工作在執行");
+        if (!scan.scanned || scanItems(scan.id).length !== scan.scanned ||
+            (scan.expected !== null && scan.expected !== scan.scanned))
+          throw new Error("截圖檢查點不完整，無法只繼續解析");
+        return json(updateScan(scan.id, {
+          status: "queued",
+          stage: "截圖已完成，繼續解析已保存畫面",
+          checkpointRequired: false,
+          error: null,
+        }));
+      }
       if (action === "resume" && scan.status === "paused") {
         if (activeBatch()) throw new Error("放生工作進行中");
         return json(
@@ -257,7 +269,7 @@ async function handle(req: NextRequest, ctx: Context) {
         searchExclusions: z.array(z.enum([
           "background", "lucky", "shiny", "costume", "shadow", "purified",
           "favorite", "legendary", "mythical", "ultrabeast", "perfect",
-        ])).max(3).default(defaultTransferSearchFilters),
+        ])).max(maxTransferSearchFilters).default(defaultTransferSearchFilters),
       })
       .parse(await body(req));
     transferSearchQuery(1, searchExclusions);
