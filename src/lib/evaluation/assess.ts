@@ -10,6 +10,7 @@ import {
 } from "../types";
 import { now } from "../store";
 import { moveName } from "../move-names";
+import { localizeForm } from "../species-names";
 import { combatPower, inferLevels, powerCost, rankIV } from "./stats";
 import { evolutionPaths, type EvolutionPath } from "./evolution";
 import { cycleDps, raidBenchmarks } from "./raid";
@@ -51,15 +52,25 @@ export function collectionForm(f: Fields, s: Species) {
   if (s.form) return s.form;
   return !f.form || f.form === "一般" || f.form === "normal" ? "normal" : f.form;
 }
+// Regional variants are ordinary catches, so they do not earn a special form
+// slot; they still stay separate from the original form in every group.
+const regionalForms = new Set([
+  "(Alolan)", "(Galarian)", "(Hisuian)", "(Paldean)", "(Aqua)", "(Blaze)", "(Combat)",
+]);
 function collectionKeys(f: Fields, s: Species) {
-  const keys: string[] = [];
-  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm(f, s)}/${collectionCostume(f.speciesId, f.costume) || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
-  if (f.shiny) keys.push(`${prefix}/shiny`);
-  if (f.costume) keys.push(`${prefix}/costume`);
-  if (s.form) keys.push(`${prefix}/form`);
+  const keys: Analysis["collectionKeys"] = [];
+  const costume = collectionCostume(f.speciesId, f.costume);
+  const prefix = `${s.id.replace(/_shadow$/, "")}/${collectionForm(f, s)}/${costume || "none"}/${Boolean(f.shiny)}/${Boolean(f.shadow)}`;
+  const add = (kind: string, label: string) => keys.push({ key: `${prefix}/${kind}`, label });
+  if (f.shiny) add("shiny", "色違");
+  if (costume) add("costume", `服裝「${costume}」`);
+  if (s.form && !regionalForms.has(s.form)) {
+    const form = s.form.replace(/^\((.+)\)$/, "$1");
+    add("form", `形態「${localizeForm(form, s.id) ?? form}」`);
+  }
   const iv = [f.ivAtk, f.ivDef, f.ivSta];
-  if (iv.every((v) => v === 15)) keys.push(`${prefix}/perfect`);
-  if (iv.every((v) => v === 0)) keys.push(`${prefix}/zero`);
+  if (iv.every((v) => v === 15)) add("perfect", "IV 全滿");
+  if (iv.every((v) => v === 0)) add("zero", "IV 全零");
   return keys;
 }
 function missingMovesWarning(f: Fields, snapshot: Snapshot) {

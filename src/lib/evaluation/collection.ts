@@ -34,15 +34,19 @@ function quality(p: Pokemon) {
   );
 }
 function pickCollectibles(living: Pokemon[], settings: Settings, add: AddPick) {
-  const collectibles = new Map<string, Pokemon[]>();
+  const collectibles = new Map<string, { label: string; peers: Pokemon[] }>();
   for (const p of living)
-    for (const key of p.analysis!.collectionKeys)
-      collectibles.set(key, [...(collectibles.get(key) || []), p]);
-  for (const peers of collectibles.values())
+    for (const { key, label } of p.analysis!.collectionKeys) {
+      const group = collectibles.get(key) || { label, peers: [] };
+      group.peers.push(p);
+      collectibles.set(key, group);
+    }
+  const slots = settings.rareRepresentatives;
+  for (const { label, peers } of collectibles.values())
     peers
       .sort((a, b) => quality(b) - quality(a))
-      .slice(0, settings.rareRepresentatives)
-      .forEach((p) => add(p, "保留此特殊收藏的代表個體", peers));
+      .slice(0, slots)
+      .forEach((p) => add(p, `${label}收藏代表（同組前 ${slots} 名）`, peers));
 }
 function pickHighIv(confirmed: Pokemon[], snapshot: Snapshot | null, add: AddPick) {
   const highIvGroups = new Map<string, Pokemon[]>();

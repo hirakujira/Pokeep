@@ -43,7 +43,7 @@ export const displayPokemonName = (name: string, costume: string | null, species
 };
 export const reviewPromptsFor = (pokemon: Pokemon) => [...new Set([
   ...(pokemon.analysis?.category === "review"
-    ? pokemon.analysis.reasons.filter((reason) => !/^(已人工確認|已保留|保留此)/.test(reason))
+    ? pokemon.analysis.reasons.filter((reason) => !/^(已人工確認|已保留|保留此)|收藏代表（同組前/.test(reason))
     : []),
   ...pokemon.issues,
 ])];

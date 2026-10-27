@@ -110,7 +110,7 @@ test("同款小火龍護目鏡歸為同一收藏槽，其他服裝仍分開", ()
     record("first", { speciesId: "charmander", costume: "泳鏡" }),
     record("second", { speciesId: "charmander", form: "一般", costume: "胸前佩戴皮卡丘造型遮陽帽" }),
   ], snapshot, { ...settings, rareRepresentatives: 1 });
-  assert.equal(evaluated.filter((p) => p.analysis?.reasons.includes("保留此特殊收藏的代表個體")).length, 1);
+  assert.equal(evaluated.filter((p) => p.analysis?.reasons.includes("服裝「胸前護目鏡」收藏代表（同組前 1 名）")).length, 1);
   assert.deepEqual(evaluated.map((p) => p.analysis?.category), ["collect", "collect"]);
 });
 
@@ -230,12 +230,12 @@ test("保留理由依優先度排序，列表第一條顯示最重要的理由",
   );
   assert.equal(locked.analysis?.reasons[0], "已由你鎖定保留");
 
-  snapshot.species.sandslash_alolan = species("sandslash_alolan", { form: "(Alolan)" });
-  const target = snapshot.species.sandslash_alolan;
+  snapshot.species.castform_rainy = species("castform_rainy", { form: "(Rainy)" });
+  const target = snapshot.species.castform_rainy;
   const [best, second] = evaluateCollection(
-    ([["阿羅拉", [14, 14, 14]], ["alolan", [13, 14, 15]]] as const)
-      .map(([form, iv], index) => record(`sandslash-${index}`, {
-        speciesId: "sandslash_alolan", form,
+    ([["雨天", [14, 14, 14]], ["rainy", [13, 14, 15]]] as const)
+      .map(([form, iv], index) => record(`castform-${index}`, {
+        speciesId: "castform_rainy", form,
         ivAtk: iv[0], ivDef: iv[1], ivSta: iv[2],
         cp: combatPower(target, [...iv], 20, snapshot),
         hp: hitPoints(target, iv[2], 20, snapshot),
@@ -243,12 +243,36 @@ test("保留理由依優先度排序，列表第一條顯示最重要的理由",
     snapshot, { ...settings, raidSlots: 0, rareRepresentatives: 2 },
   );
   assert.deepEqual(best.analysis?.reasons, [
-    "保留此特殊收藏的代表個體",
+    "形態「雨水的樣子」收藏代表（同組前 2 名）",
     "IV 42/45；保留此物種已核對個體中最佳的高 IV 收藏代表",
     "已人工確認此個體沒有進化按鈕",
   ]);
   assert.equal(second.analysis?.category, "collect");
-  assert.equal(second.analysis?.reasons[0], "保留此特殊收藏的代表個體");
+  assert.equal(second.analysis?.reasons[0], "形態「雨水的樣子」收藏代表（同組前 2 名）");
+});
+
+test("地區形態不算特殊收藏，只靠高 IV、色違等其他理由保留", () => {
+  const snapshot = fixture();
+  snapshot.species.geodude_alolan = species("geodude_alolan", { form: "(Alolan)" });
+  const target = snapshot.species.geodude_alolan;
+  const evaluated = evaluateCollection(
+    ([
+      ["alolan", [15, 14, 13], false],
+      ["阿羅拉", [12, 12, 15], false],
+      ["阿羅拉", [10, 13, 14], false],
+      ["阿羅拉", [6, 2, 6], true],
+    ] as const).map(([form, iv, shiny], index) => record(`geodude-${index}`, {
+      speciesId: "geodude_alolan", form, shiny,
+      ivAtk: iv[0], ivDef: iv[1], ivSta: iv[2],
+      cp: combatPower(target, [...iv], 20, snapshot),
+      hp: hitPoints(target, iv[2], 20, snapshot),
+    })),
+    snapshot, { ...settings, raidSlots: 0, rareRepresentatives: 2 },
+  );
+  assert.deepEqual(evaluated.map((p) => p.analysis?.category), ["collect", "transfer", "transfer", "collect"]);
+  assert.match(evaluated[0].analysis?.reasons[0] || "", /IV 42\/45.*高 IV 收藏代表/);
+  assert.ok(evaluated.every((p) => !p.analysis?.reasons.some((r) => r.startsWith("形態「"))));
+  assert.ok(evaluated[3].analysis?.reasons.includes("色違收藏代表（同組前 2 名）"));
 });
 
 test("招式學習器依招式池分出一般／厲害、成功率、遷怒限制與先進化", () => {
@@ -367,7 +391,7 @@ test("同物種多隻傳說寶可夢都不列入可放生", () => {
   assert.ok(evaluated.every((pokemon) => transferExclusion(pokemon, snapshot) === "傳說、幻之或究極異獸"));
   assert.ok(evaluated.every((pokemon) =>
     pokemon.analysis?.reasons[0] === "傳說寶可夢，保留且不列入放生候選" &&
-    !pokemon.analysis.reasons.includes("保留此特殊收藏的代表個體"),
+    !pokemon.analysis.reasons.some((reason) => reason.includes("（同組前")),
   ));
 });
 
@@ -392,7 +416,7 @@ test("幻之寶可夢先顯示稀有度，同形態不同寫法歸入同一收�
     pokemon.analysis?.reasons[0] === "幻之寶可夢，保留且不列入放生候選",
   ));
   const reasons = evaluated.map((pokemon) => pokemon.analysis?.reasons || []);
-  assert.deepEqual(reasons.map((r) => r.includes("保留此特殊收藏的代表個體")), [true, false, false]);
+  assert.deepEqual(reasons.map((r) => r.includes("形態「攻擊形態」收藏代表（同組前 1 名）")), [true, false, false]);
   assert.deepEqual(reasons.map((r) => r.some((x) => x.includes("高 IV 收藏代表"))), [true, false, false]);
 });
 

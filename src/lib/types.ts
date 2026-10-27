@@ -182,7 +182,7 @@ export type Analysis = {
   category: "transfer" | "collect" | "invest" | "evolve" | "review";
   reasons: string[];
   warnings: string[];
-  collectionKeys: string[];
+  collectionKeys: { key: string; label: string }[];
   leagues: LeagueResult[];
   raids: RaidResult[];
   currentLevels: number[];

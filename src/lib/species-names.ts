@@ -79,14 +79,18 @@ const formNames: Record<string, string> = {
   Stretchy: "平挺姿勢",
 };
 
+export function localizeForm(form: string, speciesId?: string | null): string | undefined {
+  return form === "Hero" && speciesId?.startsWith("palafin")
+    ? "全能形態"
+    : form === "Hero" ? "百戰勇者" : formNames[form];
+}
+
 export function localizeSpeciesName(name: string, speciesId?: string | null) {
   if (speciesId === "mime_jr") return name.replace(/\s*\(Jr\)/, "");
   if (speciesId === "kyurem_black") return name.replace("酋雷姆 (Black)", "闇黑酋雷姆");
   if (speciesId === "kyurem_white") return name.replace("酋雷姆 (White)", "焰白酋雷姆");
   return name.replace(/\s*\(([^()]+)\)/g, (match, form: string) => {
-    const label = form === "Hero" && speciesId?.startsWith("palafin")
-      ? "全能形態"
-      : form === "Hero" ? "百戰勇者" : formNames[form];
+    const label = localizeForm(form, speciesId);
     return label ? `（${label}）` : match;
   });
 }
