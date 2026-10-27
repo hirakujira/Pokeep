@@ -155,8 +155,16 @@ export function withFixedValues(f: Fields, species: Map<string, CatalogSpecies>)
 export type MaxStatus = "none" | "dynamax" | "gigantamax";
 export const maxStatuses: MaxStatus[] = ["none", "dynamax", "gigantamax"];
 
-/** Max states the species allows; undefined while the species or its Max data is unknown. */
-export function maxLimits(speciesId: string | null, species: Map<string, CatalogSpecies>) {
+/**
+ * Max states the species and shadow state allow; undefined while unknown.
+ * Max Battles never give a shadow or purified Pokémon.
+ */
+export function maxLimits(
+  speciesId: string | null,
+  species: Map<string, CatalogSpecies>,
+  state: ShadowState | null,
+) {
+  if (state === "shadow" || state === "purified") return ["none"] as MaxStatus[];
   const forms = speciesId ? species.get(speciesId)?.maxForms : undefined;
   return forms && (["none", ...forms] as MaxStatus[]);
 }

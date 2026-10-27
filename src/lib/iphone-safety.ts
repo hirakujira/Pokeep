@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   effective,
+  knownMaxStatus,
   type Fields,
   type Pokemon,
   type Snapshot,
@@ -245,7 +246,7 @@ export function transferExclusion(
   if (p.evolutionSilhouette === true &&
       !p.analysis.reasons.includes("同類已有更適合進化的個體"))
     return "未登錄進化剪影尚無已保留的進化代表";
-  if (p.maxStatus == null) return "極巨化狀態尚未確認";
+  if (knownMaxStatus(p, species) == null) return "極巨化狀態尚未確認";
   if (!species || p.analysis?.currentLevels.length !== 1)
     return "缺少唯一的目前等級或有效遊戲資料";
   if (

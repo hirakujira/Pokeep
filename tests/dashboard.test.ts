@@ -397,4 +397,8 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   assert.deepEqual(max(render("pidgey", {}, unknownMax)), [false, ["", "none", "dynamax"], "未能確認"]);
   assert.deepEqual(max(render("kangaskhan", {}, unknownMax)), [false, ["", "none", "dynamax", "gigantamax"], "未能確認"]);
   assert.deepEqual(max(render("magnemite", {}, unknownMax)), [false, ["", "none", "dynamax", "gigantamax"], "未能確認"]);
+  assert.deepEqual(max(render("magnemite", { shadow: true, purified: false }, unknownMax)),
+    [true, ["none"], "一般個體（暗影或淨化個體無法極巨化）"]);
+  assert.deepEqual(max(render("pidgey", { shadow: false, purified: true }, { maxStatus: "dynamax" })),
+    [false, ["", "none", "dynamax"], "極巨化"]);
 });

@@ -736,6 +736,21 @@ test("同物種極巨化只保留最佳一隻；超極巨化優先且未知不�
   assert.ok(transferExclusion(byId.get("unknown")!, snapshot));
 });
 
+test("物種未開放極巨化或個體為暗影、淨化時，未確認的極巨化狀態視為一般", () => {
+  const outcome = (maxForms?: ("dynamax" | "gigantamax")[], patch: { purified?: boolean } = {}) => {
+    const snapshot = fixture();
+    snapshot.species.caterpie.maxForms = maxForms;
+    const [p] = evaluateCollection(
+      [record("unknown", { favorite: false, ...patch }, { maxStatus: null })], snapshot, settings,
+    );
+    return [p.analysis?.category, transferExclusion(p, snapshot)];
+  };
+  assert.deepEqual(outcome([]), ["transfer", null]);
+  assert.deepEqual(outcome(["dynamax"]), ["review", "目前不屬於可放生建議"]);
+  assert.deepEqual(outcome(undefined), ["review", "目前不屬於可放生建議"]);
+  assert.deepEqual(outcome(["dynamax"], { purified: true }), ["transfer", null]);
+});
+
 test("呱呱泡蛙進化線只保留一隻超級甲賀忍蛙代表，重複個體說明保留對象", () => {
   const snapshot = fixture();
   snapshot.species.froakie = species("froakie", {

@@ -1,5 +1,6 @@
 import {
   effective,
+  knownMaxStatus,
   type Analysis,
   type Fields,
   type Pokemon,
@@ -195,7 +196,7 @@ function assignCategory(
     a.reasons.unshift("進化結果不明；保留待確認目標與進化方式");
   }
   else if (rare) a.category = "collect";
-  else if (p.maxStatus == null) {
+  else if (knownMaxStatus(p, snapshot.species[f.speciesId]) == null) {
     a.category = "review";
     a.reasons.unshift("極巨化狀態未能從能力頁確認，放生前請核對");
   }

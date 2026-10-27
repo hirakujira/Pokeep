@@ -1,5 +1,6 @@
 import {
   effective,
+  knownMaxStatus,
   type Fields,
   type LeagueResult,
   type Pokemon,
@@ -58,7 +59,7 @@ function pickHighIv(confirmed: Pokemon[], snapshot: Snapshot | null, add: AddPic
       !s || f.ivAtk === null || f.ivDef === null ||
       f.ivSta === null || f.ivAtk + f.ivDef + f.ivSta < 40 ||
       f.shadow === null || f.purified === null || f.shiny === null ||
-      f.costume !== null || p.maxStatus == null ||
+      f.costume !== null || knownMaxStatus(p, s) == null ||
       specialStateFromMoves(f).conflict
     ) continue;
     const key = `${f.speciesId}/${collectionForm(f, s, snapshot!)}/${f.shadow}`;

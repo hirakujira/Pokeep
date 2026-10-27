@@ -316,3 +316,12 @@ export const effective = (p: Pokemon): Fields => ({
   ...p.fields,
   ...p.overrides,
 });
+/**
+ * The Max status, or none when it cannot be anything else: the species has no
+ * Max form, or the Pokémon is shadow or purified, which Max Battles never give.
+ */
+export function knownMaxStatus(p: Pokemon, species: Species | null | undefined): MaxStatus | null {
+  if (p.maxStatus != null) return p.maxStatus;
+  const f = effective(p);
+  return f.shadow === true || f.purified === true || species?.maxForms?.length === 0 ? "none" : null;
+}

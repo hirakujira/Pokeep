@@ -155,7 +155,10 @@ export function PokemonDrawer({
   // button state other than "unavailable" stays editable so the conflict can be fixed.
   const noEvolutionButton = lacksEvolutionButton(fields.speciesId, speciesById) &&
     (evolutionSilhouette === null || evolutionSilhouette === "unavailable");
-  const maxChoice = restrictedChoice(maxStatuses, maxLimits(fields.speciesId, speciesById), maxStatus ?? null);
+  const maxShadow = ["shadow", "purified"].includes(shadowState(shown) ?? ""),
+    maxChoice = restrictedChoice(
+      maxStatuses, maxLimits(fields.speciesId, speciesById, shadowState(shown)), maxStatus ?? null,
+    );
   const changes = Object.fromEntries(
     (Object.keys(shown) as (keyof Fields)[])
       .filter((key) => shown[key] !== effective(p)[key])
@@ -577,7 +580,9 @@ export function PokemonDrawer({
                     >
                       {maxChoice.options.map((value) => (
                         <option key={value ?? ""} value={value ?? ""}>
-                          {value === "none" && maxChoice.fixed ? "一般個體（此物種未開放極巨化）" : maxLabels[value ?? ""]}
+                          {value === "none" && maxChoice.fixed
+                            ? maxShadow ? "一般個體（暗影或淨化個體無法極巨化）" : "一般個體（此物種未開放極巨化）"
+                            : maxLabels[value ?? ""]}
                         </option>
                       ))}
                     </select>
