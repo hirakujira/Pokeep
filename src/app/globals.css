@@ -1888,10 +1888,6 @@ body:has(.drawer-backdrop) .toast.toast-stacked {
 .tm-toggle[aria-expanded="true"] > svg:last-child {
   transform: rotate(180deg);
 }
-.tm-stale {
-  margin: 0;
-  padding: 0 20px 14px;
-}
 .tm-tabs {
   flex-wrap: nowrap;
   overflow-x: auto;

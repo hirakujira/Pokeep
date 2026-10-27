@@ -30,13 +30,6 @@ export const fieldsSchema = z.object({
   stardust: numberOrNull,
   powerUpDust: numberOrNull,
   powerUpCandy: numberOrNull,
-  // No longer scanned or used because the Game Master gives these costs; kept
-  // so stored records and older backups still parse.
-  evolutionCandy: numberOrNull,
-  secondMoveDust: numberOrNull,
-  secondMoveCandy: numberOrNull,
-  purificationDust: numberOrNull,
-  purificationCandy: numberOrNull,
 });
 export type Fields = z.infer<typeof fieldsSchema>;
 export type Gender = NonNullable<Fields["gender"]>;
@@ -69,11 +62,6 @@ export const fieldLabels: Record<keyof Fields, string> = {
   stardust: "星塵持有",
   powerUpDust: "單次強化星塵",
   powerUpCandy: "單次強化糖果",
-  evolutionCandy: "進化糖果",
-  secondMoveDust: "開招星塵",
-  secondMoveCandy: "開招糖果",
-  purificationDust: "淨化星塵",
-  purificationCandy: "淨化糖果",
 };
 // Stored records are typed from the same schemas that validate backups, so a
 // new field cannot be silently dropped on restore.
@@ -117,9 +105,9 @@ export const pokemonSchema = z.object({
   issues: z.array(z.string().max(500)).max(1000),
   candidates: z.array(z.string().max(100)).max(1000),
   verified: z.boolean(),
-  verification: z.enum(["human", "automatic"]).nullable().optional(),
-  evolutionSilhouette: evolutionSilhouetteSchema.optional(),
-  maxStatus: maxStatusSchema.optional(),
+  verification: z.enum(["human", "automatic"]).nullable(),
+  evolutionSilhouette: evolutionSilhouetteSchema,
+  maxStatus: maxStatusSchema,
   locked: z.boolean(),
   owned: z.boolean(),
   createdAt: z.string().datetime(),
@@ -199,7 +187,7 @@ export type Analysis = {
   raids: RaidResult[];
   currentLevels: number[];
   actions: string[];
-  evolutionCandy?: {
+  evolutionCandy: {
     available: number | null;
     options: {
       speciesId: string;
@@ -212,11 +200,10 @@ export type Analysis = {
     iv: number[];
     cp: number | null;
     verdict: string;
-    /** Missing when the Game Master lists no cost or the analysis predates it. */
+    /** Missing when the Game Master lists no cost. */
     cost?: { dust: number; candy: number };
   } | null;
-  /** Absent in analyses saved before move training advice existed. */
-  moveTraining?: MoveTrainingAdvice[];
+  moveTraining: MoveTrainingAdvice[];
   comparedWith: string[];
   snapshot: string | null;
   evaluatedAt: string;
@@ -226,7 +213,7 @@ export const speciesSchema = z.object({
   dex: z.number().int().min(1),
   name: z.string(),
   /** True when the species is always genderless. */
-  genderless: z.boolean().optional(),
+  genderless: z.boolean(),
   /** Genders this species can have; missing when the Game Master gives none. */
   genders: z.array(z.enum(["male", "female", "genderless"])).optional(),
   types: z.array(z.string()),
@@ -248,11 +235,11 @@ export const speciesSchema = z.object({
     }),
   ),
   /** True when the species can Mega Evolve or undergo Primal Reversion. */
-  mega: z.boolean().optional(),
-  /** Max forms this species can have; missing when the snapshot predates the Max data. */
+  mega: z.boolean(),
+  /** Max forms this species can have; missing when the Game Master has no Max data. */
   maxForms: z.array(z.enum(["dynamax", "gigantamax"])).optional(),
   thirdMove: z.object({ dust: z.number(), candy: z.number() }).nullable(),
-  /** Cost to purify the shadow form; missing when the Game Master lists none or the snapshot predates it. */
+  /** Cost to purify the shadow form; missing when the Game Master lists none. */
   purification: z.object({ dust: z.number(), candy: z.number() }).optional(),
   form: z.string().nullable(),
 });
@@ -297,8 +284,8 @@ export const snapshotSchema = z.object({
   }),
   names: z.record(z.string(), z.string()),
   moveNames: z.record(z.string(), z.string()),
-  /** Appearance-only forms by dex; absent in snapshots saved before forms were collected. */
-  visualForms: z.record(z.string(), z.array(visualFormSchema)).optional(),
+  /** Appearance-only forms by dex. */
+  visualForms: z.record(z.string(), z.array(visualFormSchema)),
   warnings: z.array(z.string()),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;

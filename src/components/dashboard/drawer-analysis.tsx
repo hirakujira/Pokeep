@@ -14,7 +14,7 @@ export function DrawerAnalysis({
   analysis: Pokemon["analysis"];
   moveNames: Record<string, string>;
 }) {
-  const candySummary = evolutionCandySummary(a?.evolutionCandy);
+  const candySummary = evolutionCandySummary(a?.evolutionCandy ?? null);
   return (
     <div className="analysis-content">
       <div className={`decision-card ${a?.category || "review"}`}>
@@ -71,7 +71,7 @@ export function DrawerAnalysis({
           ))}
         </section>
       ) : null}
-      {a?.moveTraining?.length ? (
+      {a?.moveTraining.length ? (
         <MoveTrainingSection advice={a.moveTraining} moveNames={moveNames} />
       ) : null}
       {!!a?.leagues.length && (

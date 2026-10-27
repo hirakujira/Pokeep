@@ -124,7 +124,7 @@ export function applyStoredShinyReviews(scanId: string) {
 /** Recheck visible special effects in two saved moments; never touch the phone. */
 export async function reviewUnknownSpecialStates(scanId: string) {
   const candidates = scanItems(scanId).filter((item) => {
-    if (item.specialReview || !item.pokemonId || !item.appraisalFrame) return false;
+    if (item.specialReview || !item.pokemonId) return false;
     const record = get<Pokemon>("pokemon", item.pokemonId);
     return Boolean(
       record && !record.verified && !record.candidates.length &&
@@ -144,7 +144,7 @@ export async function reviewUnknownSpecialStates(scanId: string) {
       try {
         return await reviewSpecialVisual(
           path.join(dataDir, "frames", item.frame),
-          path.join(dataDir, "frames", item.appraisalFrame!),
+          path.join(dataDir, "frames", item.appraisalFrame),
           signal,
           (usage) => recordAnalysisUsage(scanId, usage),
         );
@@ -185,7 +185,7 @@ export async function reviewUnknownShiny(scanId: string) {
   const snapshot = getSnapshot();
   if (!snapshot) return true;
   const candidates = scanItems(scanId).filter((item) => {
-    if (item.shinyReview || !item.pokemonId || !item.appraisalFrame) return false;
+    if (item.shinyReview || !item.pokemonId) return false;
     const record = get<Pokemon>("pokemon", item.pokemonId);
     const fields = record?.fields;
     return Boolean(
@@ -207,7 +207,7 @@ export async function reviewUnknownShiny(scanId: string) {
     prepare: async (item, signal) => {
       const record = get<Pokemon>("pokemon", item.pokemonId!);
       const species = record?.fields.speciesId && snapshot.species[record.fields.speciesId];
-      if (!species || !item.appraisalFrame) return null;
+      if (!species) return null;
       try {
         return await reviewShiny(
           species,

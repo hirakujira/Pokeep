@@ -286,7 +286,7 @@ export function transferSignature(
     owned: p.owned,
     verified: p.verified,
     locked: p.locked,
-    maxStatus: p.maxStatus ?? null,
+    maxStatus: p.maxStatus,
     fields: effective(p),
     analysis: p.analysis?.category,
     candidates: p.candidates,

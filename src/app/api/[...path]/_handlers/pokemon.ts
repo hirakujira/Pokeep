@@ -9,7 +9,13 @@ import {
   remove,
   transaction,
 } from "@/lib/store";
-import { effective, fieldsSchema, type Pokemon } from "@/lib/types";
+import {
+  effective,
+  evolutionSilhouetteSchema,
+  fieldsSchema,
+  maxStatusSchema,
+  type Pokemon,
+} from "@/lib/types";
 import { reevaluate } from "@/lib/evaluate";
 import { clearPokemonData } from "@/lib/clear-pokemon-data";
 import { body, json } from "./http";
@@ -20,8 +26,8 @@ const editInput = z
     verified: z.boolean().optional(),
     locked: z.boolean().optional(),
     owned: z.boolean().optional(),
-    evolutionSilhouette: z.union([z.boolean(), z.literal("unavailable"), z.literal("unknown-branch")]).nullable().optional(),
-    maxStatus: z.enum(["none", "dynamax", "gigantamax"]).nullable().optional(),
+    evolutionSilhouette: evolutionSilhouetteSchema.optional(),
+    maxStatus: maxStatusSchema.optional(),
     dismissCandidates: z.boolean().optional(),
   })
   .strict();
@@ -119,7 +125,7 @@ function mergePokemon(target: string, source: string) {
     ...a,
     fields,
     overrides,
-    maxStatus: maxConflict ? null : a.maxStatus ?? b.maxStatus ?? null,
+    maxStatus: maxConflict ? null : a.maxStatus ?? b.maxStatus,
     issues: [...new Set(issues)],
     sources: [...a.sources, ...b.sources],
     locked: a.locked || b.locked,

@@ -116,8 +116,7 @@ async function tick() {
             input: latest.apiUsage.input + input,
             output: latest.apiUsage.output + output,
             requests: latest.apiUsage.requests + 1,
-            navigationRequests:
-              (latest.apiUsage.navigationRequests || 0) + 1,
+            navigationRequests: latest.apiUsage.navigationRequests + 1,
           },
         });
     });

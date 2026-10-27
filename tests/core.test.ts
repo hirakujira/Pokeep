@@ -54,7 +54,7 @@ test("物種與地區形態顯示繁中，保留原始 ID 作配對", () => {
 test("自動核對失敗列出保存的畫面缺口", () => {
   const item: ScanItem = {
     id: "item", scanId: "scan", position: 0,
-    frame: "scan/top.jpg", appraisalFrame: "scan/iv.jpg",
+    frame: "scan/top.jpg", appraisalFrame: "scan/iv.jpg", movesFrame: "scan/moves.jpg",
     fingerprint: "fingerprint", pokemonId: "pokemon", fields: null,
     issues: [], protectionClear: false, measuredIV: [10, 12, 14],
     capturedAt: "2026-10-26T00:00:00.000Z",
@@ -603,31 +603,29 @@ test("可進化個體比較持有糖果與進化成本，成本只取遊戲資�
     { id: "metapod", candy: 12, candyPurified: 10, condition: null },
   ];
   snapshot.species.metapod = species("metapod");
-  const assessCandy = (id: string, candy: number | null, evolutionCandy: number | null,
-    purified = false) => evaluateCollection([
-      record(id, { candy, evolutionCandy, purified, favorite: false },
-        { evolutionSilhouette: true }),
+  const assessCandy = (id: string, candy: number | null, purified = false) =>
+    evaluateCollection([
+      record(id, { candy, purified, favorite: false }, { evolutionSilhouette: true }),
     ], snapshot, settings)[0].analysis;
   const required = (...args: Parameters<typeof assessCandy>) =>
     assessCandy(...args)?.evolutionCandy?.options[0].required;
-  // A stored screen reading (the candy icon read as a leading 1) is ignored.
-  assert.deepEqual(assessCandy("short", 8, 112)?.evolutionCandy, {
+  assert.deepEqual(assessCandy("short", 8)?.evolutionCandy, {
     available: 8,
     options: [{ speciesId: "metapod", name: "metapod", required: 12, condition: null }],
   });
-  assert.equal(assessCandy("enough", 60, 50)?.evolutionCandy?.available, 60);
-  assert.equal(assessCandy("unknown", null, 50)?.evolutionCandy?.available, null);
-  assert.equal(required("purified", 11, 11, true), 10);
+  assert.equal(assessCandy("enough", 60)?.evolutionCandy?.available, 60);
+  assert.equal(assessCandy("unknown", null)?.evolutionCandy?.available, null);
+  assert.equal(required("purified", 11, true), 10);
   const purified = record("x", { purified: true }).fields;
   assert.equal(evolutionPaths(snapshot.species.caterpie, purified, snapshot)[1].candy, 10);
   snapshot.species.caterpie.evolutions = [{ id: "metapod", candy: 12, condition: null }];
-  assert.equal(required("purified-estimate", 11, 10, true), 11);
+  assert.equal(required("purified-estimate", 11, true), 11);
   snapshot.species.caterpie.evolutions = [
     { id: "metapod", candy: 12, condition: null },
     { id: "butterfree", candy: 50, condition: "道具" },
   ];
   snapshot.species.butterfree = species("butterfree");
-  const branches = assessCandy("branches", 30, 12)?.evolutionCandy?.options;
+  const branches = assessCandy("branches", 30)?.evolutionCandy?.options;
   assert.deepEqual(branches?.map((option) => option.required), [12, 50]);
   assert.equal(branches?.[1].condition, "道具");
 });
@@ -1031,8 +1029,6 @@ test("開招成本取遊戲資料：暗影 1.2 倍、淨化 0.8 倍，不用畫�
     hp: hitPoints(s.species.caterpie, 15, 15, s),
     fastMove: "BUG_BITE",
     chargeMove: "STRUGGLE",
-    secondMoveDust: 99999,
-    secondMoveCandy: 999,
     ...patch,
   })], s, settings)[0].analysis?.actions.find((x) => x.startsWith("PvP 通常需第二特殊招式"));
   assert.equal(unlock("regular"), "PvP 通常需第二特殊招式；開招需 10,000 星塵及 25 糖果。");
@@ -1070,7 +1066,6 @@ test("暗影淨化 IV 每項 +2 且不超過15；不因滿IV直接推薦淨化",
     p = record("x", {
       speciesId: "caterpie_shadow",
       shadow: true,
-      purificationDust: 15000,
       ivAtk: 13,
       ivDef: 14,
       ivSta: 15,
@@ -1174,12 +1169,15 @@ test("備份路徑無法逃離來源目錄；CSV 防止公式注入", async () =
   await assert.rejects(() =>
     importBackup({
       format: "pogo-local-backup",
-      version: 1,
+      version: 2,
       pokemon: [],
       observations: [],
       settings,
       snapshot: null,
       frames: { "../secret": "abc" },
+      scans: [],
+      scanItems: [],
+      transferBatches: [],
     }),
   );
 });

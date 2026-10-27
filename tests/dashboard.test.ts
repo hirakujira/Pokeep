@@ -80,6 +80,7 @@ test("渲染團體戰比較時依排名顯示，但不改動已存的分析資�
     actions: [],
     evolutionCandy: null,
     purification: null,
+    moveTraining: [],
     comparedWith: [],
     snapshot: null,
     evaluatedAt: "2026-10-24T00:00:00.000Z",
@@ -104,6 +105,7 @@ const analysisWith = (patch: Partial<Analysis>): Analysis => ({
   actions: [],
   evolutionCandy: null,
   purification: null,
+  moveTraining: [],
   comparedWith: [],
   snapshot: null,
   evaluatedAt: "2026-10-24T00:00:00.000Z",
@@ -390,11 +392,6 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   assert.deepEqual(labels(render("tauros", { shadow: true, purified: false })), ["未確認", "無暗影形態", "暗影"]);
   assert.match(select(render("magnemite", { shadow: false, purified: true }), "暗影"),
     /<option value="purified" selected="">暗影 - 已淨化<\/option>/);
-
-  const shadowMagnemite = render("magnemite", { shadow: true, purified: false, evolutionCandy: 25, purificationDust: 3000 });
-  assert.match(shadowMagnemite, /<span>單次強化糖果</);
-  for (const label of ["進化糖果", "開招星塵", "開招糖果", "淨化星塵", "淨化糖果"])
-    assert.doesNotMatch(shadowMagnemite, new RegExp(`<span>${label}<`));
 
   const button = (html: string) => {
     const field = select(html, "進化按鈕狀態");

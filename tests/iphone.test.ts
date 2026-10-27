@@ -624,7 +624,7 @@ test("已存普通外觀只補暗影 false，保留淨化未知與人工修正",
   const item = (pokemon: typeof original): ScanItem => ({
     id: `visual-item-${pokemon.id}`, scanId, position: pokemon.id === original.id ? 0 : 1,
     frame: "visual/top.jpg", appraisalFrame: "visual/iv.jpg", movesFrame: "visual/moves.jpg",
-    fingerprint: pokemon.id, pokemonId: pokemon.id, fields: { ...pokemon.fields },
+    measuredIV: null, fingerprint: pokemon.id, pokemonId: pokemon.id, fields: { ...pokemon.fields },
     issues: [], protectionClear: false, capturedAt: new Date().toISOString(),
     specialReview: {
       verdict: "normal", model: "test", reason: "兩張均無暗影效果",
@@ -659,8 +659,8 @@ test("已存色違複核能修復單一欄位差異，人工修正仍優先", ()
     store.put("pokemon", pokemon.id, pokemon);
     store.put("scan_items", `shiny-item-${pokemon.id}`, {
       id: `shiny-item-${pokemon.id}`, scanId, position,
-      frame: "visual/top.jpg", appraisalFrame: "visual/iv.jpg",
-      fingerprint: pokemon.id, pokemonId: pokemon.id,
+      frame: "visual/top.jpg", appraisalFrame: "visual/iv.jpg", movesFrame: "visual/moves.jpg",
+      measuredIV: null, fingerprint: pokemon.id, pokemonId: pokemon.id,
       fields: { ...pokemon.fields, shiny: false }, issues: [],
       protectionClear: false, capturedAt: new Date().toISOString(),
       shinyReview: { verdict: "normal", model: "test", reason: "普通配色", reviewedAt: new Date().toISOString() },
@@ -774,13 +774,13 @@ test("掃描時間以檢查點估算，暫停與未知總數不顯示剩餘時�
     createdAt: new Date(start).toISOString(), updatedAt: new Date(start + 40_000).toISOString(),
     scanned: 4, analyzed: 0, phase: "capture", review: 0, expected: 6,
     sort: null, currentFrame: null, lastFingerprint: null,
-    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0, navigationRequests: 0, dataRequests: 0 },
     error: null, checkpointRequired: false, iphoneUseVersion: null,
   };
   const items: ScanItem[] = [0, 1, 2, 3].map((position) => ({
     id: String(position), scanId: scan.id, position,
     frame: "a/top.jpg", movesFrame: "a/moves.jpg", appraisalFrame: "a/iv.jpg",
-    fingerprint: String(position), pokemonId: null, fields: null, issues: [],
+    measuredIV: null, fingerprint: String(position), pokemonId: null, fields: null, issues: [],
     protectionClear: false,
     capturedAt: new Date(start + (position + 1) * 10_000).toISOString(),
     analyzedAt: new Date(start + 50_000 + position * 1000).toISOString(),
@@ -795,7 +795,7 @@ test("掃描時間以檢查點估算，暫停與未知總數不顯示剩餘時�
   });
   assert.deepEqual(scanTiming(
     { ...scan, phase: "analysis", status: "completed", analyzed: 4 },
-    items.map(({ analyzedAt: _legacyCheckpoint, ...item }) => item),
+    items.map(({ analyzedAt, ...item }, index) => index ? item : { ...item, analyzedAt }),
     start + 55_000,
   ), {
     phase: "capture", averageMs: 10_000, elapsedMs: 40_000, remainingMs: null,
@@ -871,7 +871,7 @@ test("已完成截圖的解析可離線續跑，缺少截圖檢查點不得完�
     sort: null,
     currentFrame: null,
     lastFingerprint: null,
-    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0, navigationRequests: 0, dataRequests: 0 },
     error: null,
     checkpointRequired: false,
     iphoneUseVersion: null,
@@ -912,7 +912,7 @@ test("疑似重複的警告只記在寶可夢紀錄，不寫進評價截圖觀�
     sort: null,
     currentFrame: null,
     lastFingerprint: null,
-    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0, navigationRequests: 0, dataRequests: 0 },
     error: null,
     checkpointRequired: false,
     iphoneUseVersion: null,
@@ -1041,7 +1041,7 @@ test("逐隻截圖只使用固定導航與本機 IV 量測，不呼叫頁面辨�
     sort: null,
     currentFrame: null,
     lastFingerprint: null,
-    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0, navigationRequests: 0, dataRequests: 0 },
     error: null,
     checkpointRequired: false,
     iphoneUseVersion: null,
@@ -1112,49 +1112,6 @@ test("備份包含尚未解析的三張手機截圖", async () => {
     "normal",
   );
   store.remove("scan_items", "raw-item");
-});
-
-test("舊版進行中的掃描保留已辨識項目並轉為截圖階段", () => {
-  const stamp = new Date().toISOString();
-  const scanId = "legacy-running-scan";
-  const scan: Scan = {
-    id: scanId,
-    scope: "all",
-    status: "running",
-    stage: "掃描中",
-    createdAt: stamp,
-    updatedAt: stamp,
-    scanned: 1,
-    review: 1,
-    expected: 725,
-    sort: null,
-    currentFrame: null,
-    lastFingerprint: null,
-    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
-    error: null,
-    checkpointRequired: false,
-    iphoneUseVersion: null,
-  };
-  store.put("scans", scanId, scan);
-  store.put("scan_items", "legacy-item", {
-    id: "legacy-item",
-    scanId,
-    position: 0,
-    frame: `${scanId}/top.jpg`,
-    appraisalFrame: `${scanId}/iv.jpg`,
-    fingerprint: "old",
-    pokemonId: "existing-pokemon",
-    fields: record("legacy").fields,
-    issues: [],
-    protectionClear: false,
-    capturedAt: stamp,
-  });
-  recoverInterruptedPhoneWork();
-  const recovered = store.get<Scan>("scans", scanId)!;
-  assert.equal(recovered.status, "paused");
-  assert.equal(recovered.phase, "capture");
-  assert.equal(recovered.scanned, 1);
-  assert.equal(recovered.analyzed, 1);
 });
 
 test("自動核對需要穩定 IV 量測、身分與特殊狀態明確", () => {
@@ -1473,12 +1430,14 @@ test("v2 備份保存手機歷史，但還原後沒有放生授權", async () =>
     createdAt: stamp,
     updatedAt: stamp,
     scanned: 1,
+    phase: "analysis",
+    analyzed: 1,
     review: 0,
     expected: 1,
     sort: "CP",
     currentFrame: null,
     lastFingerprint: null,
-    apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    apiUsage: { input: 0, output: 0, requests: 0, cached: 0, navigationRequests: 0, dataRequests: 0 },
     error: null,
     checkpointRequired: false,
     iphoneUseVersion: "0.3.16",
@@ -1551,6 +1510,8 @@ test("背景服務重啟不重送可能已執行的放生", () => {
     createdAt: stamp,
     updatedAt: stamp,
     status: "running",
+    mode: "bulk",
+    selectedPokemonId: null,
     signature: "test",
     entries: [
       { pokemonId: "a", status: "sent", reason: null },

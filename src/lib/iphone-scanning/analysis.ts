@@ -76,9 +76,8 @@ export function recordAnalysisUsage(
       output: current.apiUsage.output + tokens.output,
       requests: current.apiUsage.requests + Number(!tokens.cached),
       cached: current.apiUsage.cached + Number(tokens.cached),
-      dataRequests:
-        (current.apiUsage.dataRequests || 0) + Number(!tokens.cached),
-      navigationRequests: current.apiUsage.navigationRequests || 0,
+      dataRequests: current.apiUsage.dataRequests + Number(!tokens.cached),
+      navigationRequests: current.apiUsage.navigationRequests,
     },
   });
 }
@@ -88,8 +87,6 @@ export async function prepareAnalysis(
   item: ScanItem,
   signal: AbortSignal,
 ): Promise<PreparedAnalysis> {
-  if (!item.movesFrame || !item.appraisalFrame)
-    throw new Error(`第 ${item.position + 1} 隻缺少完整截圖，已暫停解析`);
   const snapshot = getSnapshot();
   const [recognized, measuredAgain] = await Promise.all([
     recognizeScanWithOcr(
@@ -254,7 +251,7 @@ function interpretScreens(
     fields,
     top: topResult.fields,
     appraisal: appraisalResult.fields,
-    measuredIV: item.measuredIV || null,
+    measuredIV: item.measuredIV,
     levels,
     clear: merged.clear,
     issues: blockingEvidenceIssues(merged.issues, fields),
@@ -377,7 +374,7 @@ function scanObservations(
     frame,
     fields: screens[index],
     issues: index === 2 ? issues : [],
-    ivMeasured: index === 2 ? item.measuredIV || null : null,
+    ivMeasured: index === 2 ? item.measuredIV : null,
     capturedAt: item.capturedAt,
     scanItemId: item.id,
   }));
@@ -449,11 +446,11 @@ function saveNewRecord(
       analyzedAt: now(),
     });
     updateScan(scanId, {
-      analyzed: (current.analyzed || 0) + 1,
+      analyzed: current.analyzed + 1,
       review: current.review + Number(!pokemon.verified),
       stage: current.phase === "analysis"
-        ? `已解析 ${(current.analyzed || 0) + 1} / ${current.scanned} 隻`
-        : `已截圖 ${current.scanned} 隻；同步解析 ${(current.analyzed || 0) + 1} 隻`,
+        ? `已解析 ${current.analyzed + 1} / ${current.scanned} 隻`
+        : `已截圖 ${current.scanned} 隻；同步解析 ${current.analyzed + 1} 隻`,
     });
   });
 }
@@ -467,8 +464,6 @@ export async function analyzeOne(
   specialReview?: SpecialReview,
 ) {
   if (item.pokemonId && !recheckExisting) return;
-  if (!item.movesFrame || !item.appraisalFrame)
-    throw new Error(`第 ${item.position + 1} 隻缺少完整截圖，已暫停解析`);
   const analysis =
     await (prepared || prepareAnalysis(scanId, item, new AbortController().signal));
   const snapshot = getSnapshot();

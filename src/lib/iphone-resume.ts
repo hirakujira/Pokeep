@@ -2,8 +2,7 @@ import type { TransferBatch } from "./iphone-types";
 
 /** Only the last pre-action failure and untouched entries may be retried. */
 export function resumableTransferIndexes(batch: TransferBatch): number[] {
-  if (batch.status !== "paused" || !["single", "bulk"].includes(batch.mode || ""))
-    return [];
+  if (batch.status !== "paused") return [];
   if (batch.entries.some((entry) =>
     ["searching", "unfavoriting", "prepared", "sent", "uncertain"].includes(entry.status),
   )) return [];

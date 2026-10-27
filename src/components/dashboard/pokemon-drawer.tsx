@@ -90,11 +90,9 @@ export function PokemonDrawer({
     [source, setSource] = useState(0),
     [verified, setVerified] = useState(p.verified),
     [evolutionSilhouette, setEvolutionSilhouette] = useState<boolean | "unavailable" | "unknown-branch" | null>(
-      p.evolutionSilhouette ?? null,
+      p.evolutionSilhouette,
     ),
-    [maxStatus, setMaxStatus] = useState<Pokemon["maxStatus"]>(
-      p.maxStatus ?? null,
-    ),
+    [maxStatus, setMaxStatus] = useState<Pokemon["maxStatus"]>(p.maxStatus),
     [dismiss, setDismiss] = useState(false),
     [saveReviewReasons, setSaveReviewReasons] = useState<string[] | null>(null),
     [proofError, setProofError] = useState(false);
@@ -106,8 +104,8 @@ export function PokemonDrawer({
     setSpeciesQuery("");
     setDexChoice(null);
     setVerified(p.verified);
-    setEvolutionSilhouette(p.evolutionSilhouette ?? null);
-    setMaxStatus(p.maxStatus ?? null);
+    setEvolutionSilhouette(p.evolutionSilhouette);
+    setMaxStatus(p.maxStatus);
     setDismiss(false);
   }, [p.id, p.updatedAt, p.verified, p.locked, p.owned]);
   useEffect(() => {

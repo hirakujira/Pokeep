@@ -102,22 +102,6 @@ test("內部錯誤回 500 且不外洩細節，預期錯誤仍回 400", async ()
   assert.equal(phone.status, 400);
   assert.equal((await phone.json()).error, "畫面已改變，請重試");
 });
-test("CSV 匯出可處理缺少理由的舊版分析資料", async () => {
-  store.put(
-    "pokemon",
-    "legacy-analysis",
-    record("legacy-analysis", {}, {
-      analysis: { category: "transfer" } as unknown as Pokemon["analysis"],
-    }),
-  );
-  try {
-    const response = await request("export?format=csv");
-    assert.equal(response.status, 200);
-    assert.match(await response.text(), /"legacy-analysis".*"transfer"/);
-  } finally {
-    store.remove("pokemon", "legacy-analysis");
-  }
-});
 test("正式Next服務內部hostname與瀏覽器不同時，同源寫入仍可儲存", async () => {
   const req = new NextRequest("http://localhost:3000/api/iphone/prepare", {
     method: "POST",
@@ -213,16 +197,16 @@ test("逐隻放生每次只授權一個候選，重複請求與整批執行被�
     (await request(`transfers/${batch.id}/approve`, "POST", {})).status,
     400,
   );
-  store.put("transfer_batches", "legacy-bulk", {
+  store.put("transfer_batches", "bulk-draft", {
     ...batch,
-    id: "legacy-bulk",
+    id: "bulk-draft",
     mode: "bulk",
   });
   assert.equal(
-    (await request("transfers/legacy-bulk/approve", "POST", {})).status,
+    (await request("transfers/bulk-draft/approve", "POST", {})).status,
     400,
   );
-  store.remove("transfer_batches", "legacy-bulk");
+  store.remove("transfer_batches", "bulk-draft");
   assert.equal(
     (
       await request(`transfers/${batch.id}/execute-one`, "POST", {
@@ -540,6 +524,9 @@ test("放生紀錄可逐筆從畫面清除並保留於資料與備份，執行�
     observations: [],
     settings: store.getSettings(),
     snapshot: null,
+    frames: {},
+    scans: [],
+    scanItems: [],
     transferBatches: [kept],
   });
   assert.equal(restored.status, 200);

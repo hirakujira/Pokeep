@@ -9,8 +9,8 @@ export type ScanTiming = {
 
 /** Use completed checkpoints; long gaps are pauses, not per-Pokémon work. */
 export function scanTiming(scan: Scan, items: ScanItem[], clock = Date.now()): ScanTiming {
-  // Scans captured by older builds have no analysis checkpoints. Keep their
-  // measured capture average visible instead of reporting missing data.
+  // Two analysis checkpoints give the first interval; until then the capture
+  // average is the only measurement.
   const analysisCheckpoints = items.filter((item) => item.analyzedAt).length;
   const phase = scan.phase === "analysis" && analysisCheckpoints >= 2
     ? "analysis"
@@ -36,7 +36,7 @@ export function scanTiming(scan: Scan, items: ScanItem[], clock = Date.now()): S
   const recentAverage = recent.length >= 3
     ? recent.reduce((sum, ms) => sum + ms, 0) / recent.length
     : null;
-  const done = phase === "capture" ? scan.scanned : scan.analyzed ?? 0;
+  const done = phase === "capture" ? scan.scanned : scan.analyzed;
   const total = phase === "capture" ? scan.expected : scan.scanned;
   const lastCheckpoint = Math.max(0, ...timestamps.map((item) => item.time).filter(Number.isFinite));
   const end = scan.status === "completed"

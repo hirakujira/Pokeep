@@ -266,11 +266,8 @@ export function MoveTrainingPanel({
   const active = records.filter(
     (p) => p.owned && p.analysis && p.analysis.category !== "review",
   );
-  const stale = active.some(
-    (p) => p.analysis!.category === "invest" && !p.analysis!.moveTraining,
-  );
   const advised = active.flatMap((pokemon) =>
-    (pokemon.analysis!.moveTraining || []).map((advice) => ({ pokemon, advice })),
+    pokemon.analysis!.moveTraining.map((advice) => ({ pokemon, advice })),
   );
   const entries = advised
     .filter(({ advice }) => advice.status === "train")
@@ -308,11 +305,6 @@ export function MoveTrainingPanel({
       </button>
       {open && (
         <>
-          {stale && (
-            <p className="warning-text tm-stale">
-              部分個體的建議是舊版計算結果，按下方「重新計算建議」後才會列出學習器用法。
-            </p>
-          )}
           <div className="filter-tabs tm-tabs" role="tablist" aria-label="學習器種類">
             {tmOrder.map((tm) => (
               <button

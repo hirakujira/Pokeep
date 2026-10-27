@@ -135,7 +135,7 @@ function ScanProgressPanel({
       </div>
       <div className="iphone-metrics">
         <strong>{scan.scanned} 隻已截圖</strong>
-        <span>{scan.analyzed ?? (scan.phase ? 0 : scan.scanned)} 隻已解析</span>
+        <span>{scan.analyzed} 隻已解析</span>
         <span>
           {scan.expected === null
             ? "總數待確認"
@@ -156,17 +156,8 @@ function ScanProgressPanel({
             }</span>
           </>
         )}
-        {scan.apiUsage.navigationRequests === undefined &&
-        scan.apiUsage.dataRequests === undefined ? (
-          <span>
-            {scan.apiUsage.requests} 次 AI 呼叫（舊紀錄未分項）
-          </span>
-        ) : (
-          <>
-            <span>{scan.apiUsage.navigationRequests ?? 0} 次畫面判斷</span>
-            <span>{scan.apiUsage.dataRequests ?? 0} 次資料辨識</span>
-          </>
-        )}
+        <span>{scan.apiUsage.navigationRequests} 次畫面判斷</span>
+        <span>{scan.apiUsage.dataRequests} 次資料辨識</span>
       </div>
       {scan.timing && (
         <p className="caption">剩餘時間依近期每隻速度估算，截圖與解析分階段計算；長時間暫停不列入平均。</p>
@@ -184,7 +175,7 @@ function ScanProgressPanel({
       {scan.phase === "analysis" && (
         <p className="caption">
           {scan.scanned} 隻截圖已保存，還有{" "}
-          {Math.max(0, scan.scanned - (scan.analyzed || 0))}
+          {Math.max(0, scan.scanned - scan.analyzed)}
           {" "}隻待解析；解析完成後會自動標為完成，不需操作手機。
         </p>
       )}

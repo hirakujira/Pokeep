@@ -1,23 +1,14 @@
 import { all, now, put } from "./store";
-import { scanItems, updateScan } from "./iphone-data";
+import { updateScan } from "./iphone-data";
 import type { Scan, TransferBatch } from "./iphone-types";
 
 export function recoverInterruptedPhoneWork() {
-  for (const scan of all<Scan>("scans")) {
-    const legacy = scan.phase === undefined || scan.analyzed === undefined;
-    const patch: Partial<Scan> = legacy
-      ? {
-          phase: scan.status === "completed" ? "analysis" : "capture",
-          analyzed: scanItems(scan.id).filter((item) => item.pokemonId).length,
-        }
-      : {};
+  for (const scan of all<Scan>("scans"))
     if (scan.status === "running")
-      Object.assign(patch, {
+      updateScan(scan.id, {
         status: "paused",
         stage: "背景服務重新啟動；請檢查手機畫面後續掃",
       });
-    if (legacy || scan.status === "running") updateScan(scan.id, patch);
-  }
   for (const batch of all<TransferBatch>("transfer_batches"))
     if (batch.status === "running" || batch.status === "approved") {
       const entries = batch.entries.map((entry) =>

@@ -8,7 +8,7 @@ import { normalFormTexts } from "../species-names";
 export function visualForm(f: Fields, s: Species, snapshot: Snapshot) {
   if (s.form || !f.form) return null;
   const text = f.form.trim().toLowerCase();
-  return snapshot.visualForms?.[s.dex]?.find((form) =>
+  return snapshot.visualForms[s.dex]?.find((form) =>
     form.id === text || form.label.toLowerCase() === text) ?? null;
 }
 // A form-specific species ID already names its form; scanned labels for the

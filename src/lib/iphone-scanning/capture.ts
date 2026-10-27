@@ -96,7 +96,7 @@ export async function captureOne(
       currentFrame: top.frame,
       lastFingerprint: fingerprint,
       stage: current.scanned + 1 >= 20
-        ? `已截圖 ${current.scanned + 1} 隻；同步解析 ${current.analyzed || 0} 隻`
+        ? `已截圖 ${current.scanned + 1} 隻；同步解析 ${current.analyzed} 隻`
         : `已截圖 ${current.scanned + 1} 隻；累積 20 隻後開始解析`,
     });
   });

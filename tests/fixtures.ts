@@ -11,6 +11,7 @@ export const species = (id: string, patch: Partial<Species> = {}): Species => ({
   id,
   dex: 10,
   name: id,
+  genderless: false,
   atk: 55,
   def: 55,
   sta: 128,
@@ -20,6 +21,7 @@ export const species = (id: string, patch: Partial<Species> = {}): Species => ({
   elite: [],
   tags: [],
   evolutions: [],
+  mega: false,
   thirdMove: { dust: 10000, candy: 25 },
   form: null,
   ...patch,
@@ -76,6 +78,7 @@ export function fixture(): Snapshot {
     },
     names: { caterpie: "綠毛蟲" },
     moveNames: { BUG_BITE: "蟲咬" },
+    visualForms: {},
     warnings: [],
   };
 }
@@ -110,6 +113,8 @@ export function record(
     issues: [],
     candidates: [],
     verified: true,
+    verification: null,
+    evolutionSilhouette: null,
     maxStatus: "none",
     locked: false,
     owned: true,

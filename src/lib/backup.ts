@@ -33,17 +33,15 @@ import { reevaluate } from "./evaluate";
 
 const backupSchema = z.object({
   format: z.literal("pogo-local-backup"),
-  version: z.union([z.literal(1), z.literal(2)]),
+  version: z.literal(2),
   pokemon: z.array(pokemonSchema).max(20000),
   observations: z.array(observationSchema).max(50000),
   settings: settingsSchema,
   snapshot: snapshotSchema.nullable(),
-  frames: z
-    .record(z.string().refine(validFrame), z.string().max(2000000))
-    .optional(),
-  scans: z.array(scanSchema).max(20000).optional(),
-  scanItems: z.array(scanItemSchema).max(50000).optional(),
-  transferBatches: z.array(transferBatchSchema).max(20000).optional(),
+  frames: z.record(z.string().refine(validFrame), z.string().max(2000000)),
+  scans: z.array(scanSchema).max(20000),
+  scanItems: z.array(scanItemSchema).max(50000),
+  transferBatches: z.array(transferBatchSchema).max(20000),
 });
 export async function exportBackup() {
   const pokemon = listPokemon(),
@@ -51,9 +49,7 @@ export async function exportBackup() {
   for (const frame of new Set([
     ...pokemon.flatMap((p) => p.sources.map((s) => s.frame)),
     ...all<ScanItem>("scan_items").flatMap((item) =>
-      [item.frame, item.movesFrame, item.appraisalFrame].filter((name): name is string =>
-        Boolean(name),
-      ),
+      [item.frame, item.movesFrame, item.appraisalFrame],
     ),
     ...all<TransferBatch>("transfer_batches").flatMap((batch) =>
       batch.entries
@@ -86,7 +82,7 @@ export async function importBackup(input: unknown) {
   const backup = backupSchema.parse(input);
   let imported = 0;
   // Do not replace existing records or their manual corrections when restoring a second time.
-  for (const [frame, encoded] of Object.entries(backup.frames || {})) {
+  for (const [frame, encoded] of Object.entries(backup.frames)) {
     const target = path.join(dataDir, "frames", frame);
     await fs.mkdir(path.dirname(target), { recursive: true });
     const bytes = Buffer.from(encoded, "base64");
@@ -103,7 +99,7 @@ export async function importBackup(input: unknown) {
       }
     for (const o of backup.observations)
       if (!get("observations", o.id)) put("observations", o.id, o);
-    for (const scan of backup.scans || [])
+    for (const scan of backup.scans)
       if (!get("scans", scan.id))
         put("scans", scan.id, {
           ...scan,
@@ -111,9 +107,9 @@ export async function importBackup(input: unknown) {
           stage: "從備份還原的歷史掃描",
           error: null,
         });
-    for (const item of backup.scanItems || [])
+    for (const item of backup.scanItems)
       if (!get("scan_items", item.id)) put("scan_items", item.id, item);
-    for (const batch of backup.transferBatches || [])
+    for (const batch of backup.transferBatches)
       if (!get("transfer_batches", batch.id))
         put("transfer_batches", batch.id, {
           ...batch,
@@ -168,7 +164,7 @@ export function exportCsv(records = listPokemon()) {
       String(f.ivDef ?? ""),
       String(f.ivSta ?? ""),
       p.analysis?.category || "review",
-      p.analysis?.reasons?.join("；") || "",
+      p.analysis?.reasons.join("；") || "",
       p.owned ? "是" : "否",
     ]);
   }

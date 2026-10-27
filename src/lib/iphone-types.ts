@@ -21,8 +21,8 @@ export const scanSchema = z.object({
   updatedAt: z.string().datetime(),
   completedAt: z.string().datetime().optional(),
   scanned: z.number().int().nonnegative(),
-  phase: z.enum(["capture", "analysis"]).optional(),
-  analyzed: z.number().int().nonnegative().optional(),
+  phase: z.enum(["capture", "analysis"]),
+  analyzed: z.number().int().nonnegative(),
   review: z.number().int().nonnegative(),
   expected: z.number().int().nonnegative().nullable(),
   sort: z.string().nullable(),
@@ -33,8 +33,8 @@ export const scanSchema = z.object({
     output: z.number(),
     requests: z.number(),
     cached: z.number(),
-    navigationRequests: z.number().optional(),
-    dataRequests: z.number().optional(),
+    navigationRequests: z.number(),
+    dataRequests: z.number(),
   }),
   error: z.string().nullable(),
   checkpointRequired: z.boolean(),
@@ -47,9 +47,9 @@ export const scanItemSchema = z.object({
   scanId: z.string().max(100),
   position: z.number().int().nonnegative(),
   frame: frameSchema,
-  appraisalFrame: frameSchema.nullable(),
-  movesFrame: frameSchema.optional(),
-  measuredIV: ivMeasuredSchema.optional(),
+  appraisalFrame: frameSchema,
+  movesFrame: frameSchema,
+  measuredIV: ivMeasuredSchema,
   fingerprint: z.string(),
   pokemonId: z.string().nullable(),
   fields: fieldsSchema.nullable(),
@@ -106,7 +106,7 @@ export const transferBatchSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   status: z.enum(["draft", "approved", "running", "paused", "completed", "stopped", "stale"]),
-  mode: z.enum(["single", "bulk"]).optional(),
+  mode: z.enum(["single", "bulk"]),
   searchExclusions: z
     .array(
       z.enum(
@@ -118,7 +118,7 @@ export const transferBatchSchema = z.object({
     )
     .max(maxTransferSearchFilters)
     .optional(),
-  selectedPokemonId: z.string().nullable().optional(),
+  selectedPokemonId: z.string().nullable(),
   needsBoxReturn: z.boolean().optional(),
   signature: z.string(),
   entries: z.array(transferEntrySchema),
