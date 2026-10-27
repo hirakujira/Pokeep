@@ -10,9 +10,7 @@
 
 ## 1. 安裝 iPhone Use
 
-iPhone Use 目前是私有倉庫，需要 GitHub 存取權限，或使用已取得的原始碼包。
-
-建議把它放在 Pokéep 專案的同一層資料夾，Pokéep 不用設定就會找到：
+建議把 iPhone Use 放在 Pokéep 專案的同一層資料夾，Pokéep 不用設定就會找到：
 
 ```sh
 cd <Pokéep 專案的上層資料夾>
