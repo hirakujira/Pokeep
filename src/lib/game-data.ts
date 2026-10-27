@@ -43,6 +43,13 @@ const norm = (s: string) =>
 // PvPoke marks these available, special-case Pokémon as unreleased because
 // ordinary PvP simulations do not cover them. They still belong in the catalog.
 const catalogExceptions = new Set(["ditto", "shedinja", "cosmog"]);
+// GO's zh-Hant text has no names past #1008; these come from the official Taiwan Pokédex.
+const missingSpeciesNames: Record<number, string> = {
+  1011: "裹蜜蟲",
+  1012: "斯魔茶",
+  1013: "來悲粗茶",
+  1019: "蜜集大蛇",
+};
 
 export function addCatalogForms(species: Snapshot["species"]) {
   const aliases: Record<string, { base: string; form: string | null }> = {
@@ -203,7 +210,9 @@ export function normalizeData(
     const baseId = p.speciesId.replace(/_shadow$/, ""),
       g = gmPokemon.get(norm(baseId));
     const zh =
-      tr[`pokemon_name_${String(p.dex).padStart(4, "0")}`] || p.speciesName;
+      tr[`pokemon_name_${String(p.dex).padStart(4, "0")}`] ||
+      missingSpeciesNames[p.dex] ||
+      p.speciesName;
     const suffix =
       p.speciesName
         .match(/\(.+\)/)?.[0]

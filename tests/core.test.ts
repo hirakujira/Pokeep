@@ -1243,7 +1243,7 @@ test("遊戲資料更新失敗時保留已驗證的舊快照", async () => {
   }
 });
 
-test("物種目錄包含脫殼忍者與已知形態，仍排除一般未開放資料", async () => {
+test("物種目錄包含脫殼忍者與已知形態，補上文字檔缺少的中文名，仍排除一般未開放資料", async () => {
   const { normalizeData, addCatalogForms } = await import("../src/lib/game-data");
   const base = (id: string, dex: number, released: boolean) => ({
     speciesId: id, speciesName: id, dex, released,
@@ -1253,7 +1253,8 @@ test("物種目錄包含脫殼忍者與已知形態，仍排除一般未開放�
   const pokemon = Array.from({ length: 100 }, (_, index) =>
     base(`fixture_${index}`, index + 1, true));
   pokemon.push(base("shedinja", 292, false), base("ditto", 132, false),
-    base("cosmog", 789, false), base("unreleased_fixture", 9999, false));
+    base("cosmog", 789, false), base("unreleased_fixture", 9999, false),
+    base("dipplin", 1011, true));
   const gm = [
     { templateId: "PLAYER_LEVEL_SETTINGS", data: {
       playerLevel: { cpMultiplier: Array(51).fill(0.5) },
@@ -1267,6 +1268,7 @@ test("物種目錄包含脫殼忍者與已知形態，仍排除一般未開放�
   const normalized = normalizeData({ pokemon, moves: [] }, gm,
     "RESOURCE ID: pokemon_name_0292\nTEXT: 脫殼忍者", ranks, "test-version");
   assert.equal(normalized.species.shedinja.name, "脫殼忍者");
+  assert.equal(normalized.species.dipplin.name, "裹蜜蟲");
   assert.ok(normalized.species.ditto);
   assert.ok(normalized.species.cosmog);
   assert.equal(normalized.species.unreleased_fixture, undefined);
