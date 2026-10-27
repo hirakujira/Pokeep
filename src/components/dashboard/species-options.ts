@@ -152,6 +152,12 @@ export function withFixedValues(f: Fields, species: Map<string, CatalogSpecies>)
   };
 }
 
+/** True when no evolve button can show: no evolution, Mega Evolution or Primal Reversion. */
+export function lacksEvolutionButton(speciesId: string | null, species: Map<string, CatalogSpecies>) {
+  const s = speciesId ? species.get(speciesId) : undefined;
+  return s?.evolves === false && !s.mega;
+}
+
 /**
  * Why this Pokémon cannot have the cost, shown in place of the value; null
  * when it can. A stored value stays editable so a misread can be cleared.

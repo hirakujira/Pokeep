@@ -8,6 +8,7 @@ import {
   type Fields,
   type MoveTrainingAdvice,
   type MoveTrainingStep,
+  type Pokemon,
   type RaidResult,
 } from "../src/lib/types";
 import { record } from "./fixtures";
@@ -299,6 +300,7 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
       { id: "tauros", dex: 128, name: "肯泰羅", types: ["normal"], form: null, genders: ["male" as const], evolves: false },
       { id: "magnemite", dex: 81, name: "小磁怪", types: ["electric"], form: null, genders: ["genderless" as const], evolves: true },
       { id: "magnemite_shadow", dex: 81, name: "小磁怪（暗影）", types: ["electric"], form: null, genders: ["genderless" as const], evolves: true },
+      { id: "kangaskhan", dex: 115, name: "袋獸", types: ["normal"], form: null, genders: ["female" as const], evolves: false, mega: true },
     ],
   };
   const byId = new Map(catalog.species.map((s) => [s.id, s]));
@@ -324,16 +326,17 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   assert.deepEqual(restrictedChoice(["male", "female", "genderless"], undefined, null).options,
     [null, "male", "female", "genderless"]);
 
-  const render = (speciesId: string, patch: Partial<Fields> = {}) => renderToString(React.createElement(PokemonDrawer, {
-    pokemon: record(speciesId, { speciesId, gender: null, shadow: null, purified: null, ...patch }),
-    records: [],
-    catalog,
-    error: "",
-    onClose: () => {},
-    onSave: async () => null,
-    onMerge: async () => {},
-    busy: false,
-  }));
+  const render = (speciesId: string, patch: Partial<Fields> = {}, other: Partial<Pokemon> = {}) =>
+    renderToString(React.createElement(PokemonDrawer, {
+      pokemon: record(speciesId, { speciesId, gender: null, shadow: null, purified: null, ...patch }, other),
+      records: [],
+      catalog,
+      error: "",
+      onClose: () => {},
+      onSave: async () => null,
+      onMerge: async () => {},
+      busy: false,
+    }));
   const select = (html: string, label: string) =>
     html.match(new RegExp(`<span>${label}(?:(?!</label>).)*?(<select[^>]*>.*?</select>)`))?.[1] ?? "";
   const tauros = render("tauros");
@@ -371,4 +374,15 @@ test("性別與暗影依物種限制選項，只剩一個值時固定並停用�
   const misread = render("tauros", { evolutionCandy: 25, purificationDust: 3000 });
   assert.deepEqual(costs(misread), [null, null, "沒有暗影形態"]);
   assert.match(input(misread, "進化糖果"), /value="25"/);
+
+  const button = (html: string) => {
+    const field = select(html, "進化按鈕狀態");
+    return [/^<select disabled="">/.test(field), field.match(/<option[^>]* selected=""[^>]*>([^<]*)</)?.[1]];
+  };
+  assert.deepEqual(button(tauros), [true, "無法進化"]);
+  assert.deepEqual(button(render("tauros", {}, { evolutionSilhouette: "unavailable" })), [true, "無法進化"]);
+  assert.deepEqual(button(render("tauros", {}, { evolutionSilhouette: true })), [false, "未登錄剪影"]);
+  assert.deepEqual(button(render("kangaskhan")), [false, "未能確認"]);
+  assert.deepEqual(button(render("pidgey", {}, { evolutionSilhouette: "unavailable" })), [false, "無法進化（沒有進化按鈕）"]);
+  assert.deepEqual(button(render("unknown_species")), [false, "未能確認"]);
 });

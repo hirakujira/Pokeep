@@ -29,6 +29,8 @@ export type Catalog = {
     genders?: Gender[];
     /** False when the species has no evolution. */
     evolves?: boolean;
+    /** True when the species can Mega Evolve or undergo Primal Reversion. */
+    mega?: boolean;
   }[];
   moves: { id: string; name: string }[];
   visualForms: Record<string, VisualForm[]>;

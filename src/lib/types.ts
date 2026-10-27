@@ -251,6 +251,8 @@ export type Species = {
     condition: string | null;
     gender?: string;
   }[];
+  /** True when the species can Mega Evolve or undergo Primal Reversion. */
+  mega?: boolean;
   thirdMove: { dust: number; candy: number } | null;
   form: string | null;
 };

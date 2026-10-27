@@ -26,6 +26,7 @@ import {
   dexEntries,
   formChoice,
   keptFormKey,
+  lacksEvolutionButton,
   restrictedChoice,
   shadowFields,
   shadowState,
@@ -141,6 +142,10 @@ export function PokemonDrawer({
     speciesById = useMemo(() => new Map(catalog.species.map((s) => [s.id, s])), [catalog]);
   const reviewPrompts = reviewPromptsFor(p);
   const shown = withFixedValues(fields, speciesById);
+  // A final evolution shows as such without storing anything; a stored
+  // button state other than "unavailable" stays editable so the conflict can be fixed.
+  const noEvolutionButton = lacksEvolutionButton(fields.speciesId, speciesById) &&
+    (evolutionSilhouette === null || evolutionSilhouette === "unavailable");
   const changes = Object.fromEntries(
     (Object.keys(shown) as (keyof Fields)[])
       .filter((key) => shown[key] !== effective(p)[key])
@@ -522,10 +527,13 @@ export function PokemonDrawer({
                     <span>進化按鈕狀態</span>
                     <select
                       value={
-                        evolutionSilhouette === null
-                          ? ""
-                          : String(evolutionSilhouette)
+                        noEvolutionButton
+                          ? "unavailable"
+                          : evolutionSilhouette === null
+                            ? ""
+                            : String(evolutionSilhouette)
                       }
+                      disabled={noEvolutionButton}
                       onChange={(event) =>
                         setEvolutionSilhouette(
                           event.target.value === ""
@@ -542,7 +550,9 @@ export function PokemonDrawer({
                       <option value="true">未登錄剪影</option>
                       <option value="false">已登錄彩色圖示</option>
                       <option value="unknown-branch">進化結果不明（例如問號）</option>
-                      <option value="unavailable">無法進化（沒有進化按鈕）</option>
+                      <option value="unavailable">
+                        {noEvolutionButton ? "無法進化" : "無法進化（沒有進化按鈕）"}
+                      </option>
                     </select>
                     <small>從招式頁判定；問號代表有進化按鈕，但無法確定結果。特殊造型等個體可能沒有進化按鈕。</small>
                   </label>

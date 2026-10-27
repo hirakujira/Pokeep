@@ -202,7 +202,13 @@ export function normalizeData(
   const tr = parseTexts(texts),
     gmPokemon = new Map<string, Raw>();
   const dexGenders = gendersByDex(gm),
-    pvpIds = new Set<string>(pvp.pokemon.map((p: Raw) => p.speciesId));
+    pvpIds = new Set<string>(pvp.pokemon.map((p: Raw) => p.speciesId)),
+    // Either source can list a Mega the other lacks, such as PvPoke's Staraptor.
+    pvpMegaBases = new Set<string>(
+      pvp.pokemon
+        .filter((p: Raw) => p.tags?.includes("mega"))
+        .map((p: Raw) => p.speciesId.replace(/_(mega(_[xy])?|primal)$/, "")),
+    );
   for (const row of gm)
     if (row.data?.pokemonSettings)
       gmPokemon.set(
@@ -311,6 +317,8 @@ export function normalizeData(
       elite: p.eliteMoves || [],
       tags: [...new Set(tags)] as string[],
       evolutions,
+      mega: pvpMegaBases.has(baseId) ||
+        Boolean(g?.tempEvoOverrides?.some((o: Raw) => o.tempEvoId)),
       thirdMove: g?.thirdMove
         ? {
             dust: g.thirdMove.stardustToUnlock,

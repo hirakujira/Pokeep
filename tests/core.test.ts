@@ -1374,6 +1374,41 @@ test("性別分歧的進化依性別對應各自的路線與物種 ID", async ()
   assert.deepEqual(evolutions("snorunt"), [["froslass", "female"], ["glalie", undefined]]);
 });
 
+test("遊戲資料標記可 Mega 進化或原始回歸的物種", async () => {
+  const { normalizeData } = await import("../src/lib/game-data");
+  const base = (id: string, dex: number, tags?: string[]) => ({
+    speciesId: id, speciesName: id, dex, released: true, tags,
+    baseStats: { atk: 100, def: 100, hp: 100 }, types: ["normal", "none"],
+    fastMoves: [], chargedMoves: [],
+  });
+  const pokemon = [
+    ...Array.from({ length: 100 }, (_, index) => base(`fixture_${index}`, index + 1)),
+    base("kyogre", 382), base("snorlax", 143), base("tauros", 128),
+    base("staraptor", 398), base("staraptor_mega", 398, ["mega"]),
+  ];
+  const settings = (dex: number, name: string, tempEvoOverrides: Record<string, unknown>[]) => ({
+    templateId: `V${String(dex).padStart(4, "0")}_POKEMON_${name}`,
+    data: { pokemonSettings: { tempEvoOverrides } },
+  });
+  const gm = [
+    { templateId: "PLAYER_LEVEL_SETTINGS", data: {
+      playerLevel: { cpMultiplier: Array(51).fill(0.5) },
+    } },
+    { templateId: "POKEMON_UPGRADE_SETTINGS", data: {
+      pokemonUpgrades: { stardustCost: [1000], candyCost: [1], xlCandyCost: [1] },
+    } },
+    settings(382, "KYOGRE", [{ tempEvoId: "TEMP_EVOLUTION_PRIMAL" }]),
+    // An override without a temporary evolution, as Gengar's extra entry has.
+    settings(143, "SNORLAX", [{}]),
+  ];
+  const ranks = Object.fromEntries(["1500", "2500", "10000"].map((cap) =>
+    [cap, Array.from({ length: 100 }, () => ({ speciesId: "fixture_0", score: 1 }))]));
+  const { species: result } = normalizeData({ pokemon, moves: [] }, gm, "", ranks, "test-version");
+  assert.deepEqual(["kyogre", "staraptor", "snorlax", "tauros"].map((id) => result[id].mega),
+    [true, true, false, false]);
+  assert.equal(result.staraptor_mega, undefined);
+});
+
 test("遊戲資料收集外觀形態，略過服裝、戰鬥中形態與已有物種 ID 的形態", async () => {
   const { normalizeData } = await import("../src/lib/game-data");
   const base = (id: string, dex: number) => ({
