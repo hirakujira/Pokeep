@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { IphoneMcp, iphoneUseVersion } from "../src/lib/iphone-mcp";
+import { iphoneUseVersion } from "../src/lib/iphone-mcp";
+import { deviceMcpVersion } from "../src/lib/device-mcp";
+import {
+  createPhoneConnection,
+  phoneConnectionKey,
+} from "../src/lib/phone-connection";
 import { runScan } from "../src/lib/iphone-scan";
 import { runTransferBatch } from "../src/lib/iphone-transfer";
 import { activeBatch, activeScan, updateScan } from "../src/lib/iphone-data";
@@ -39,27 +44,35 @@ process.once("exit", cleanup);
 recoverInterruptedPhoneWork();
 reevaluate();
 
-const phone = new IphoneMcp();
-let phoneConfig = JSON.stringify({
-  root: getRuntimeConfig().iphoneUseRoot,
-  python: getRuntimeConfig().iphoneUsePython,
-});
+let phone = createPhoneConnection();
+let phoneConfig = phoneConnectionKey(getRuntimeConfig());
 let ready = false;
 let message = "等待連接 iPhone";
 let activeOperationId: string | null = null;
+function backendVersion() {
+  const config = getRuntimeConfig();
+  return config.phoneBackend === "device-mcp"
+    ? deviceMcpVersion(config.deviceMcpExecutable)
+    : iphoneUseVersion();
+}
 const heartbeat = setInterval(() => {
   try {
+    const backend = getRuntimeConfig().phoneBackend;
     let version: string | null = null;
     try {
-      version = iphoneUseVersion();
+      version = backendVersion();
     } catch {
-      message = "找不到 iPhone Use，請到網頁「設定」頁指定位置";
+      message =
+        backend === "device-mcp"
+          ? "找不到 Device MCP，請到網頁「設定」頁指定位置"
+          : "找不到 iPhone Use，請到網頁「設定」頁指定位置";
     }
     put("settings", "iphone-worker", {
       updatedAt: now(),
       ready,
       message,
       version,
+      backend,
     });
     if (activeOperationId)
       put("settings", "iphone-operation", {
@@ -75,15 +88,13 @@ const heartbeat = setInterval(() => {
 }, 2000);
 
 async function tick() {
-  const nextPhoneConfig = JSON.stringify({
-    root: getRuntimeConfig().iphoneUseRoot,
-    python: getRuntimeConfig().iphoneUsePython,
-  });
+  const nextPhoneConfig = phoneConnectionKey(getRuntimeConfig());
   if (nextPhoneConfig !== phoneConfig && !activeScan() && !activeBatch()) {
     phone.close();
+    phone = createPhoneConnection();
     phoneConfig = nextPhoneConfig;
     ready = false;
-    message = "iPhone Use 設定已更新，請重新準備連線";
+    message = "手機連線設定已更新，請重新準備連線";
   }
   const prepare = get<{ requestedAt: string }>("settings", "iphone-prepare");
   if (prepare) {

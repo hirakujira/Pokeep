@@ -2,6 +2,9 @@ import path from "node:path";
 import { z } from "zod";
 import { get, put } from "./store";
 
+export const phoneBackends = ["iphone-use", "device-mcp"] as const;
+export type PhoneBackend = (typeof phoneBackends)[number];
+
 export const defaultRuntimeConfig = {
   apiKey: null as string | null,
   model: "gpt-4.1-mini",
@@ -10,6 +13,10 @@ export const defaultRuntimeConfig = {
   shinyReviewConcurrency: 6,
   iphoneUseRoot: path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "iPhone-use"),
   iphoneUsePython: "python3",
+  phoneBackend: "iphone-use" as PhoneBackend,
+  deviceMcpExecutable: "/Applications/Device MCP.app/Contents/MacOS/device-mcp",
+  // Empty means the device currently selected inside Device MCP.
+  deviceMcpDevice: "",
 };
 export type RuntimeConfig = typeof defaultRuntimeConfig;
 export type PublicRuntimeConfig = Omit<RuntimeConfig, "apiKey"> & {
@@ -25,6 +32,9 @@ const patchSchema = z.object({
   shinyReviewConcurrency: z.number().int().min(1).max(8).optional(),
   iphoneUseRoot: z.string().trim().max(1000).optional(),
   iphoneUsePython: z.string().trim().max(1000).optional(),
+  phoneBackend: z.enum(phoneBackends).optional(),
+  deviceMcpExecutable: z.string().trim().max(1000).optional(),
+  deviceMcpDevice: z.string().trim().max(200).optional(),
 }).strict();
 
 export function validateBaseUrl(value: string): string {
@@ -59,6 +69,11 @@ export function saveRuntimeConfig(input: unknown): PublicRuntimeConfig {
   const python = patch.iphoneUsePython ?? current.iphoneUsePython;
   if (!/^(?:python(?:3(?:\.\d+)?)?|\/[^\0]+\/python(?:3(?:\.\d+)?)?)$/.test(python))
     throw new Error("Python 指令只能是 python3 或絕對路徑的 Python 執行檔");
+  const executable = patch.deviceMcpExecutable ?? current.deviceMcpExecutable;
+  if (!path.isAbsolute(executable) || executable.includes("\0"))
+    throw new Error("Device MCP 執行檔必須是絕對路徑");
+  const device = patch.deviceMcpDevice ?? current.deviceMcpDevice;
+  if (/\p{Cc}/u.test(device)) throw new Error("裝置名稱不能包含控制字元");
   const next: RuntimeConfig = {
     apiKey: patch.clearApiKey ? null : patch.apiKey?.trim() || current.apiKey,
     model: patch.model ?? current.model,
@@ -67,6 +82,9 @@ export function saveRuntimeConfig(input: unknown): PublicRuntimeConfig {
     shinyReviewConcurrency: patch.shinyReviewConcurrency ?? current.shinyReviewConcurrency,
     iphoneUseRoot: root,
     iphoneUsePython: python,
+    phoneBackend: patch.phoneBackend ?? current.phoneBackend,
+    deviceMcpExecutable: executable,
+    deviceMcpDevice: device,
   };
   put("settings", "runtime-config", next);
   return publicRuntimeConfig(next);

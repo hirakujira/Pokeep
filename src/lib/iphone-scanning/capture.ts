@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { IphoneMcp } from "../iphone-mcp";
+import type { PhoneConnection } from "../phone-connection";
 import { saveEvidenceFrame } from "../frame-evidence";
 import { measureIV } from "../iv";
 import { detailFingerprint } from "../iphone-fingerprint";
@@ -7,7 +7,7 @@ import { dataDir, get, id, now, put, transaction } from "../store";
 import { updateScan } from "../iphone-data";
 import type { Scan, ScanItem } from "../iphone-types";
 import type { PhoneObservation } from "./phone";
-import { scanPoint, swipeScan, tapScan } from "./gestures";
+import { blindNavigation, scanPoint, swipeScan, tapScan } from "./gestures";
 import { appraisalForScan, dismissAppraisalForScan } from "./appraisal";
 
 export async function saveCapture(
@@ -39,10 +39,14 @@ export async function saveCapture(
 }
 
 export async function captureOne(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   scan: Scan,
   detail: PhoneObservation,
 ) {
+  const blind = blindNavigation(phone);
+  // Blind dismissal is only confirmed by this screenshot of the next Pokémon.
+  if (blind && detail.image?.path && (await measureIV(detail.image.path)))
+    throw new Error("評價條仍顯示；已暫停避免切換錯誤個體");
   const position = scan.scanned;
   const top = await saveCapture(
     detail,
@@ -62,10 +66,12 @@ export async function captureOne(
     false,
     0.71,
   );
-  const menu = await tapScan(phone, lowerObservation, scanPoint.menu);
+  const menu = await tapScan(phone, lowerObservation, scanPoint.menu, { blind });
+  // The appraisal always opens on the leader's intro, so a blind tap leaves
+  // appraisalForScan to tap through it and screenshot the bars.
   const appraisal = await appraisalForScan(
     phone,
-    await tapScan(phone, menu, scanPoint.appraise),
+    await tapScan(phone, menu, scanPoint.appraise, { blind }),
   );
   const appCapture = await saveCapture(
     appraisal,

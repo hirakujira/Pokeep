@@ -26,6 +26,9 @@ export const empty: State = {
     shinyReviewConcurrency: 6,
     iphoneUseRoot: "",
     iphoneUsePython: "python3",
+    phoneBackend: "iphone-use",
+    deviceMcpExecutable: "/Applications/Device MCP.app/Contents/MacOS/device-mcp",
+    deviceMcpDevice: "",
   },
 };
 export const tabs = [

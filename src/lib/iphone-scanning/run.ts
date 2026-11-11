@@ -1,5 +1,4 @@
-import type { IphoneMcp } from "../iphone-mcp";
-import { iphoneUseVersion } from "../iphone-mcp";
+import { phoneBackendVersion, type PhoneConnection } from "../phone-connection";
 import { getRuntimeConfig } from "../runtime-config";
 import { reevaluate } from "../evaluate";
 import { get, now } from "../store";
@@ -56,7 +55,7 @@ export async function analyzeScan(scanId: string) {
 }
 
 async function clearSearchAndFilters(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   current: PhoneObservation,
   page: PhonePage,
 ) {
@@ -73,7 +72,7 @@ async function clearSearchAndFilters(
   return { current, page };
 }
 
-async function openFirstPokemon(phone: IphoneMcp, scan: Scan) {
+async function openFirstPokemon(phone: PhoneConnection, scan: Scan) {
   let current = await identifyGame(phone, await ensureReady(phone));
   let page = scan.scanned === 0 ? await classify(current) : null;
   if (scan.scanned === 0 && page?.page !== "collection")
@@ -122,7 +121,7 @@ function backgroundAnalysis(scanId: string) {
 
 /** Returns the latest scan when capture finished, or null when it stopped or paused. */
 async function captureRemaining(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   scan: Scan,
   current: PhoneObservation,
   analysis: ReturnType<typeof backgroundAnalysis>,
@@ -151,14 +150,14 @@ async function captureRemaining(
   }
 }
 
-export async function runScan(phone: IphoneMcp, initial: Scan) {
+export async function runScan(phone: PhoneConnection, initial: Scan) {
   const scan = updateScan(initial.id, {
     status: "running",
     stage: initial.phase === "analysis" ? "繼續解析已保存畫面" : "檢查 iPhone",
     iphoneUseVersion:
       initial.phase === "analysis"
         ? initial.iphoneUseVersion
-        : iphoneUseVersion(),
+        : phoneBackendVersion(),
   });
   if (scan.phase === "analysis") {
     await analyzeScan(scan.id);

@@ -1,4 +1,4 @@
-import type { IphoneMcp } from "../iphone-mcp";
+import type { PhoneConnection } from "../phone-connection";
 import { inspectPhoneImage, type PhonePage, type Target } from "../iphone-vision";
 
 export type PhoneObservation = {
@@ -17,17 +17,12 @@ const pageCache = new Map<string, PhonePage>();
 export async function inspectObservation(
   observation: PhoneObservation,
   target: Target | null = null,
-  redactLocation = false,
 ) {
   if (!observation.image?.path) throw new Error("手機沒有回傳截圖");
-  const key = `${observation.observation_id}:${observation.image.path}:${target || "page"}:${redactLocation}`;
+  const key = `${observation.observation_id}:${observation.image.path}:${target || "page"}`;
   const cached = pageCache.get(key);
   if (cached) return cached;
-  const page = await inspectPhoneImage(
-    observation.image.path,
-    target,
-    redactLocation,
-  );
+  const page = await inspectPhoneImage(observation.image.path, target);
   if (pageCache.size >= 64) pageCache.delete(pageCache.keys().next().value!);
   pageCache.set(key, page);
   return page;
@@ -48,7 +43,7 @@ type Setup = {
   job_id?: string;
 };
 
-async function waitForService(phone: IphoneMcp, status: Setup) {
+async function waitForService(phone: PhoneConnection, status: Setup) {
   const latestBuild = [...(status.jobs || [])]
     .reverse()
     .find((row) => row.action === "build");
@@ -88,7 +83,7 @@ async function waitForService(phone: IphoneMcp, status: Setup) {
     );
 }
 
-export async function ensureReady(phone: IphoneMcp) {
+export async function ensureReady(phone: PhoneConnection) {
   const status = await phone.call<Setup>("setup", { action: "status" });
   if (status.ok === false)
     throw new Error(status.error || "iPhone Use 設定檢查失敗");
@@ -109,7 +104,7 @@ export async function ensureReady(phone: IphoneMcp) {
   return ready.observation;
 }
 
-export async function observe(phone: IphoneMcp): Promise<PhoneObservation> {
+export async function observe(phone: PhoneConnection): Promise<PhoneObservation> {
   const result = await phone.call<PhoneObservation>("observe", {
     mode: "screenshot",
   });
@@ -126,9 +121,8 @@ export async function observe(phone: IphoneMcp): Promise<PhoneObservation> {
 export async function classify(
   observation: PhoneObservation,
   target: Target | null = null,
-  redactLocation = false,
 ) {
-  const page = await inspectObservation(observation, target, redactLocation);
+  const page = await inspectObservation(observation, target);
   if (
     page.confidence < 0.8 ||
     page.hasUnexpectedOverlay ||
@@ -139,7 +133,7 @@ export async function classify(
   return page;
 }
 
-export async function identifyGame(phone: IphoneMcp, first: PhoneObservation) {
+export async function identifyGame(phone: PhoneConnection, first: PhoneObservation) {
   const apps = await phone.call<{
     candidates?: {
       bundle_id: string;

@@ -1,4 +1,4 @@
-import type { IphoneMcp } from "../iphone-mcp";
+import type { PhoneConnection } from "../phone-connection";
 import { phoneVisionBottom, type PhonePage, type Target } from "../iphone-vision";
 import {
   classify,
@@ -16,10 +16,20 @@ export const scanPoint = {
   appraisalDialog: { x: 0.5, y: 0.94 },
 } as const;
 
+/** Whether calibrated scan navigation may tap without screenshotting the result. */
+export function blindNavigation(phone: PhoneConnection) {
+  return phone.capabilities?.blindNavigation === true;
+}
+
+/**
+ * With `blind`, the tap is not observed and the input observation is returned
+ * unchanged: the next tap only needs its image size and observation id.
+ */
 export async function tapScan(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   observation: PhoneObservation,
   point: Point,
+  { blind = false }: { blind?: boolean } = {},
 ) {
   if (!observation.image) throw new Error("沒有可用於點擊的手機截圖");
   const image = observation.image;
@@ -27,15 +37,16 @@ export async function tapScan(
     x: point.x * image.width * image.pixel_to_point[0],
     y: point.y * image.height * image.pixel_to_point[1],
     observation_id: observation.observation_id,
-    observe: "screenshot",
+    observe: blind ? "none" : "screenshot",
   });
+  if (blind) return observation;
   return result.observation?.image?.pixel_to_point?.length === 2
     ? result.observation
     : observe(phone);
 }
 
 export async function swipeScan(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   observation: PhoneObservation,
   direction: "up" | "left",
 ) {
@@ -51,7 +62,7 @@ export async function swipeScan(
 }
 
 export async function tapInitialTarget(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   observation: PhoneObservation,
   target: Target,
 ) {
@@ -69,13 +80,12 @@ export async function tapInitialTarget(
 }
 
 export async function tapTarget(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   observation: PhoneObservation,
   target: Target,
   expected: PhonePage["page"][],
-  redactLocation = false,
 ) {
-  const page = await classify(observation, target, redactLocation);
+  const page = await classify(observation, target);
   if (
     !expected.includes(page.page) ||
     !page.targetClear ||

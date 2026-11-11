@@ -1,4 +1,4 @@
-import type { IphoneMcp } from "../iphone-mcp";
+import type { PhoneConnection } from "../phone-connection";
 import { measureIV } from "../iv";
 import {
   classify,
@@ -6,9 +6,10 @@ import {
   observe,
   type PhoneObservation,
 } from "./phone";
-import { scanPoint, tapScan, tapTarget } from "./gestures";
+import { blindNavigation, scanPoint, tapScan, tapTarget } from "./gestures";
 
-export async function appraisalForScan(phone: IphoneMcp, initial: PhoneObservation) {
+export async function appraisalForScan(phone: PhoneConnection, initial: PhoneObservation) {
+  const singleFrame = phone.capabilities?.singleAppraisalFrame === true;
   let current = initial;
   let previous: string | null = null;
   let advances = 0;
@@ -17,6 +18,7 @@ export async function appraisalForScan(phone: IphoneMcp, initial: PhoneObservati
       ? await measureIV(current.image.path)
       : null;
     if (measured?.confidence && measured.confidence >= 0.8) {
+      if (singleFrame) return current;
       const values = measured.values.join("/");
       if (values === previous) return current;
       previous = values;
@@ -32,9 +34,13 @@ export async function appraisalForScan(phone: IphoneMcp, initial: PhoneObservati
 }
 
 export async function dismissAppraisalForScan(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   initial: PhoneObservation,
 ) {
+  // The next swipe screenshots the following Pokémon, and captureOne pauses
+  // when that screen still shows appraisal bars or has not advanced.
+  if (blindNavigation(phone))
+    return tapScan(phone, initial, scanPoint.appraisalDialog, { blind: true });
   let current = initial;
   for (let attempt = 0; attempt < 3; attempt++) {
     current = await tapScan(phone, current, scanPoint.appraisalDialog);
@@ -49,7 +55,7 @@ export async function dismissAppraisalForScan(
 }
 
 export async function appraisalWithBars(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   initial: PhoneObservation,
 ) {
   let current = initial;
@@ -80,7 +86,7 @@ export async function appraisalWithBars(
 }
 
 export async function closeAppraisal(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   initial: PhoneObservation,
 ) {
   let current = initial;

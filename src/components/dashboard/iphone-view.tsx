@@ -17,6 +17,9 @@ export function IphoneView({
   busy: string;
   actions: ScanActions;
 }) {
+  // Older workers omit backend; they only ever ran iPhone Use.
+  const deviceMcp = phoneState?.worker?.backend === "device-mcp";
+  const backendLabel = deviceMcp ? "Device MCP" : "iPhone Use";
   return (
     <div className="iphone-workspace">
       <section className="panel iphone-panel">
@@ -36,8 +39,10 @@ export function IphoneView({
         </p>
         <small className="muted">
           {phoneState?.worker?.version
-            ? `iPhone Use ${phoneState.worker.version}`
-            : "首次使用需先完成 iPhone Use 的裝置信任、開發者模式與 WDA 簽名。"}
+            ? `${backendLabel} ${phoneState.worker.version}`
+            : deviceMcp
+              ? "首次使用需在 Device MCP 連接並信任 iPhone，並依提示開啟開發者模式。"
+              : "首次使用需先完成 iPhone Use 的裝置信任、開發者模式與 WDA 簽名。"}
         </small>
         <div className="iphone-actions">
           <button
@@ -47,15 +52,17 @@ export function IphoneView({
           >
             檢查連線
           </button>
-          <a
-            className="text-link"
-            href="https://github.com/zhongerxin/iPhone-use#先在自己的-iphone-上安装并启动-wda"
-            target="_blank"
-            rel="noreferrer"
-          >
-            首次設定指引
-            <ArrowUpRight size={14} />
-          </a>
+          {!deviceMcp && (
+            <a
+              className="text-link"
+              href="https://github.com/zhongerxin/iPhone-use#先在自己的-iphone-上安装并启动-wda"
+              target="_blank"
+              rel="noreferrer"
+            >
+              首次設定指引
+              <ArrowUpRight size={14} />
+            </a>
+          )}
         </div>
       </section>
       <section className="panel iphone-panel">

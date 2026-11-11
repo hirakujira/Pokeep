@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { getRuntimeConfig } from "./runtime-config";
+import type { PhoneCapabilities, PhoneConnection } from "./phone-connection";
 
 type Result = {
   content?: { type: string; text?: string }[];
@@ -29,7 +30,12 @@ export function iphoneUseVersion() {
   return `${version} (${createHash("sha256").update(content).digest("hex").slice(0, 12)})`;
 }
 
-export class IphoneMcp {
+export class IphoneMcp implements PhoneConnection {
+  readonly backend = "iphone-use";
+  readonly capabilities: PhoneCapabilities = {
+    blindNavigation: false,
+    singleAppraisalFrame: false,
+  };
   private child: ChildProcessWithoutNullStreams | null = null;
   private sequence = 0;
   private buffer = "";
@@ -133,6 +139,11 @@ export class IphoneMcp {
       throw error;
     }
     return data;
+  }
+  async typeSearch(query: string) {
+    // Loaded lazily because iphone-direct-input imports this module.
+    const { injectSearchText } = await import("./iphone-direct-input");
+    return injectSearchText(query);
   }
   close() {
     this.child?.kill();

@@ -1,7 +1,7 @@
 import type { Gender, Pokemon, Settings, VisualForm } from "@/lib/types";
 import type { Scan, TransferBatch } from "@/lib/iphone-types";
 import type { ScanTiming } from "@/lib/scan-timing";
-import type { PublicRuntimeConfig } from "@/lib/runtime-config";
+import type { PhoneBackend, PublicRuntimeConfig } from "@/lib/runtime-config";
 
 export type SnapshotInfo = {
   version: string;
@@ -44,6 +44,7 @@ export type PhoneState = {
     ready: boolean;
     message: string;
     version: string | null;
+    backend?: PhoneBackend;
   } | null;
   scan: (Scan & { timing?: ScanTiming }) | null;
   batch: TransferBatch | null;

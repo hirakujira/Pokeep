@@ -1,14 +1,20 @@
 # Pokéep · Pokémon GO iPhone 自動掃描與清倉助手
 
-在 Mac 本機執行的網頁工具。它透過 [iPhone Use](https://github.com/zhongerxin/iPhone-use) 以 USB 操作 iPhone，自動掃描 Pokémon GO 的寶可夢盒子，用 OpenAI 辨識畫面，再依團體戰、PvP 與收藏價值給出保留或放生建議。沒有登入或公開部署，僅供私人本機使用。
+在 Mac 本機執行的網頁工具。它透過 [iPhone Use](https://github.com/zhongerxin/iPhone-use) 或 Device MCP 以 USB 操作 iPhone，自動掃描 Pokémon GO 的寶可夢盒子，用 OpenAI 辨識畫面，再依團體戰、PvP 與收藏價值給出保留或放生建議。沒有登入或公開部署，僅供私人本機使用。
 
 ## 需求
 
 - macOS、Node.js **24 LTS**（使用內建 SQLite）
 - OpenAI API key，或支援 Responses API 的相容伺服器
-- iPhone Use 及其依賴：完整 Xcode、可簽名的 Apple 開發團隊、Python 3.9+、以 USB 連接的 iPhone
+- 以 USB 連接的 iPhone，以及下列其中一種手機連線工具：
+  - iPhone Use 及其依賴：完整 Xcode、可簽名的 Apple 開發團隊、Python 3.9+
+  - Device MCP（macOS App，安裝於 `/Applications/Device MCP.app`）
 
-## 1. 安裝 iPhone Use
+## 1. 準備手機連線
+
+Pokéep 可用 iPhone Use（預設）或 Device MCP 操作 iPhone，擇一設定即可，之後可在「設定」頁切換。
+
+### iPhone Use
 
 建議把 iPhone Use 放在 Pokéep 專案的同一層資料夾，Pokéep 不用設定就會找到：
 
@@ -27,14 +33,25 @@ git clone https://github.com/zhongerxin/iPhone-use.git
 
 首次設定完成後，Pokéep 會沿用同一份設定，需要時自行啟動 WDA。若 WDA 回報 `No Account for Team`，請確認 iPhone Use 設定的 Team ID 與 Xcode 目前登入帳號的團隊一致。
 
-### 指定 iPhone Use 路徑
+#### 指定 iPhone Use 路徑
 
 預設路徑是 Pokéep 專案旁的 `../iPhone-use`。若放在其他位置：
 
 1. 啟動 Pokéep（見下一節），開啟「設定」頁。
-2. 在「iPhone Use → 專案位置」填入 iPhone Use 原始碼資料夾的**絕對路徑**，例如 `/Users/<你的帳號>/Code/iPhone-use`。該資料夾內必須有 `server/iphone_use.py`。
+2. 在「手機連線」選「iPhone Use」，於「iPhone Use 專案位置」填入 iPhone Use 原始碼資料夾的**絕對路徑**，例如 `/Users/<你的帳號>/Code/iPhone-use`。該資料夾內必須有 `server/iphone_use.py`。
 3. 若要用的不是系統的 `python3`，在「Python 指令或執行檔」填入絕對路徑，例如 `/opt/homebrew/bin/python3`。
 4. 按「儲存連線與解析設定」，再到「iPhone 掃描」頁按「檢查連線」。
+
+### Device MCP
+
+1. 安裝 Device MCP，確認 `/Applications/Device MCP.app` 存在。
+2. 以 USB 連接並信任 iPhone，依 Device MCP 的提示開啟開發者模式，直到 Device MCP 能看到並操作這台手機。
+3. 在 iPhone 的「設定 → Pokémon GO → 從其他 App 貼上」選「允許」。放生搜尋時，Pokéep 會把整串搜尋字串放到 iPhone 剪貼簿再貼上；沒有永久允許時，每次貼上都會跳出詢問而中斷自動操作。開啟通用剪貼簿時，Mac 剪貼簿也會被換成搜尋字串；第一次寫入剪貼簿時 Device MCP 可能要求你核准。
+4. 啟動 Pokéep，在「設定」頁的「手機連線」選「Device MCP」。執行檔預設為 `/Applications/Device MCP.app/Contents/MacOS/device-mcp`，若放在其他位置請填入絕對路徑。
+5. 「裝置名稱或 UDID」留空會使用 Device MCP 目前選取的裝置；連接多台手機時填入裝置名稱（例如 `Gungnir`）或 UDID。
+6. 按「儲存連線與解析設定」，再到「iPhone 掃描」頁按「檢查連線」。
+
+Device MCP 掃描時，開選單、開評價與關閉評價的點擊後不再額外截圖確認，只截取能力、招式與評價條這三張資料畫面，速度比 iPhone Use 快；放生仍會逐步截圖核對每一步。
 
 ## 2. 啟動 Pokéep
 

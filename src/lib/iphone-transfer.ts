@@ -2,9 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { IphoneMcp } from "./iphone-mcp";
+import type { PhoneConnection } from "./phone-connection";
 import { hasBackgroundExclamationGlyph } from "./iphone-query-glyph";
-import { injectSearchText } from "./iphone-direct-input";
 import {
   ensureReady,
   observe,
@@ -56,7 +55,7 @@ const transferPoint = {
 } as const;
 
 async function tapFast(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   observation: Awaited<ReturnType<typeof observe>>,
   point: { x: number; y: number },
 ) {
@@ -70,7 +69,7 @@ async function tapFast(
 }
 
 export async function observeGameForeground(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   first: Awaited<ReturnType<typeof observe>>,
   wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds)),
@@ -88,7 +87,7 @@ export async function observeGameForeground(
 
 /** Recover only post-transfer navigation. The irreversible transfer tap is never replayed. */
 export async function settleAfterSubmitted(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   dialog: Awaited<ReturnType<typeof observe>>,
   keepSearch: boolean,
   wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
@@ -113,7 +112,7 @@ export async function settleAfterSubmitted(
 
 /** A skipped detail may still be open. Leave it before searching the next entry. */
 export async function returnToBoxAfterSkip(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   first: Awaited<ReturnType<typeof observe>>,
   readLines: (path: string) => Promise<Awaited<ReturnType<typeof readLocalOcr>>[number]> =
     async (path) => (await readLocalOcr([path]))[0],
@@ -143,7 +142,7 @@ export async function returnToBoxAfterSkip(
   throw new Error("跳過後按 X 未回到寶可夢盒子列表；請查看手機畫面後再繼續");
 }
 
-async function waitForSearchScreen(phone: IphoneMcp) {
+async function waitForSearchScreen(phone: PhoneConnection) {
   await observeGameForeground(phone, await observe(phone));
 }
 
@@ -189,7 +188,7 @@ export async function confirmNonBackgroundQuery(
 }
 
 async function submitSearch(
-  phone: IphoneMcp, dex: number, background: boolean | "exclude-background",
+  phone: PhoneConnection, dex: number, background: boolean | "exclude-background",
   extras: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
 ) {
   let observed = "搜尋欄未讀到文字";
@@ -229,7 +228,7 @@ function setEntry(
 }
 
 async function findCandidateByDexCp(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   current: Awaited<ReturnType<typeof observe>>,
   dex: number,
   cp: number,
@@ -324,11 +323,11 @@ function completeBoxIds() {
 }
 
 export async function typeNumericSearch(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   dex: number,
-  inject: (query: string) => Promise<void> = injectSearchText,
-  waitForScreen: (phone: IphoneMcp) => Promise<void> = waitForSearchScreen,
-  submit: (phone: IphoneMcp, dex: number, background: boolean) => Promise<void> = submitSearch,
+  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
+  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
+  submit: (phone: PhoneConnection, dex: number, background: boolean) => Promise<void> = submitSearch,
 ) {
   if (!Number.isInteger(dex) || dex < 1 || dex > 10000)
     throw new Error("沒有可靠的圖鑑編號，無法搜尋候選");
@@ -338,11 +337,11 @@ export async function typeNumericSearch(
 }
 
 export async function typeBackgroundSearch(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   dex: number,
-  inject: (query: string) => Promise<void> = injectSearchText,
-  waitForScreen: (phone: IphoneMcp) => Promise<void> = waitForSearchScreen,
-  submit: (phone: IphoneMcp, dex: number, background: boolean) => Promise<void> = submitSearch,
+  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
+  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
+  submit: (phone: PhoneConnection, dex: number, background: boolean) => Promise<void> = submitSearch,
 ) {
   const query = backgroundQuery(dex);
   await waitForScreen(phone);
@@ -351,11 +350,11 @@ export async function typeBackgroundSearch(
 }
 
 export async function typeNonBackgroundSearch(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   dex: number,
-  inject: (query: string) => Promise<void> = injectSearchText,
-  waitForScreen: (phone: IphoneMcp) => Promise<void> = waitForSearchScreen,
-  submit: (phone: IphoneMcp, dex: number, background: boolean | "exclude-background") => Promise<void> = submitSearch,
+  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
+  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
+  submit: (phone: PhoneConnection, dex: number, background: boolean | "exclude-background") => Promise<void> = submitSearch,
 ) {
   const query = nonBackgroundQuery(dex);
   await waitForScreen(phone);
@@ -364,12 +363,12 @@ export async function typeNonBackgroundSearch(
 }
 
 export async function typeFilteredSearch(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   dex: number,
   extras: readonly TransferSearchFilter[],
-  inject: (query: string) => Promise<void> = injectSearchText,
-  waitForScreen: (phone: IphoneMcp) => Promise<void> = waitForSearchScreen,
-  submit: (phone: IphoneMcp, dex: number, extras: readonly TransferSearchFilter[]) => Promise<void> =
+  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
+  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
+  submit: (phone: PhoneConnection, dex: number, extras: readonly TransferSearchFilter[]) => Promise<void> =
     (phone, dex, extras) => submitSearch(phone, dex, "exclude-background", extras),
 ) {
   const query = transferSearchQuery(dex, extras);
@@ -424,7 +423,7 @@ export function nextPendingUsesDex(
 }
 
 export async function runTransferBatch(
-  phone: IphoneMcp,
+  phone: PhoneConnection,
   requested: TransferBatch,
 ) {
   let batch = get<TransferBatch>("transfer_batches", requested.id);

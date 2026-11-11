@@ -743,6 +743,51 @@ test("狀態介面只回傳 API 是否設定，不暴露 key", async () => {
   delete process.env.OPENAI_API_KEY;
   store.remove("settings", "runtime-config");
 });
+test("手機連線設定預設使用 iPhone Use，並驗證 Device MCP 的執行檔與裝置名稱", async () => {
+  store.remove("settings", "runtime-config");
+  const initial = (await (await request("state")).json()).runtime;
+  assert.equal(initial.phoneBackend, "iphone-use");
+  assert.equal(initial.deviceMcpExecutable, "/Applications/Device MCP.app/Contents/MacOS/device-mcp");
+  assert.equal(initial.deviceMcpDevice, "");
+  const changed = await request("runtime-settings", "PATCH", {
+    phoneBackend: "device-mcp",
+    deviceMcpExecutable: "/Opt/Device MCP/device-mcp",
+    deviceMcpDevice: "  Skíðblaðnir  ",
+  });
+  assert.equal(changed.status, 200);
+  const runtime = (await (await request("state")).json()).runtime;
+  assert.equal(runtime.phoneBackend, "device-mcp");
+  assert.equal(runtime.deviceMcpExecutable, "/Opt/Device MCP/device-mcp");
+  assert.equal(runtime.deviceMcpDevice, "Skíðblaðnir");
+  for (const patch of [
+    { phoneBackend: "adb" },
+    { deviceMcpExecutable: "device-mcp" },
+    { deviceMcpExecutable: "/Applications/device\0mcp" },
+    { deviceMcpDevice: "x".repeat(201) },
+    { deviceMcpDevice: "Gung\nnir" },
+    { deviceMcpDevice: "Gung\u0007nir" },
+  ])
+    assert.equal((await request("runtime-settings", "PATCH", patch)).status, 400, JSON.stringify(patch));
+  assert.equal((await request("runtime-settings", "PATCH", { deviceMcpDevice: "x".repeat(200) })).status, 200);
+  assert.equal((await request("runtime-settings", "PATCH", { deviceMcpDevice: "" })).status, 200);
+  assert.equal((await (await request("state")).json()).runtime.deviceMcpDevice, "");
+  store.remove("settings", "runtime-config");
+});
+test("手機狀態介面回傳背景服務使用的連線方式", async () => {
+  const previous = store.get("settings", "iphone-worker");
+  store.put("settings", "iphone-worker", {
+    updatedAt: new Date().toISOString(),
+    ready: true,
+    message: "已連線",
+    version: "0.11.0",
+    backend: "device-mcp",
+  });
+  const worker = (await (await request("iphone")).json()).worker;
+  assert.equal(worker.backend, "device-mcp");
+  assert.equal(worker.version, "0.11.0");
+  if (previous) store.put("settings", "iphone-worker", previous);
+  else store.remove("settings", "iphone-worker");
+});
 test("人工修正會持久保存、重新評估且可標記放生再恢復", async () => {
   store.saveSnapshot(fixture());
   store.put("pokemon", "edited", record("edited"));

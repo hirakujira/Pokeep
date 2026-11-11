@@ -51,6 +51,9 @@ export function SettingsView({
     state.runtime.shinyReviewConcurrency,
     state.runtime.iphoneUseRoot,
     state.runtime.iphoneUsePython,
+    state.runtime.phoneBackend,
+    state.runtime.deviceMcpExecutable,
+    state.runtime.deviceMcpDevice,
   ]);
   return (
     <div className="settings-grid">
@@ -108,17 +111,48 @@ export function SettingsView({
           管理 OpenAI API keys
           <ArrowUpRight size={14} />
         </a>
-        <h3>iPhone Use</h3>
-        <div className="preference-fields">
-          <label>
-            <span>專案位置</span>
-            <input value={runtime.iphoneUseRoot} onChange={(event) => setRuntime((value) => ({ ...value, iphoneUseRoot: event.target.value }))} />
-          </label>
-          <label>
-            <span>Python 指令或執行檔</span>
-            <input value={runtime.iphoneUsePython} onChange={(event) => setRuntime((value) => ({ ...value, iphoneUsePython: event.target.value }))} />
-          </label>
+        <h3>手機連線</h3>
+        <div className="segmented" role="radiogroup" aria-label="手機連線方式">
+          {(
+            [
+              { value: "iphone-use", label: "iPhone Use" },
+              { value: "device-mcp", label: "Device MCP" },
+            ] as const
+          ).map((option) => (
+            <label key={option.value}>
+              <input
+                type="radio"
+                name="phone-backend"
+                checked={runtime.phoneBackend === option.value}
+                onChange={() => setRuntime((value) => ({ ...value, phoneBackend: option.value }))}
+              />
+              {option.label}
+            </label>
+          ))}
         </div>
+        {runtime.phoneBackend === "device-mcp" ? (
+          <div className="preference-fields">
+            <label>
+              <span>Device MCP 執行檔</span>
+              <input value={runtime.deviceMcpExecutable} onChange={(event) => setRuntime((value) => ({ ...value, deviceMcpExecutable: event.target.value }))} />
+            </label>
+            <label>
+              <span>裝置名稱或 UDID（留空使用 Device MCP 目前選取的裝置）</span>
+              <input value={runtime.deviceMcpDevice} maxLength={200} placeholder="留空使用 Device MCP 目前選取的裝置" onChange={(event) => setRuntime((value) => ({ ...value, deviceMcpDevice: event.target.value }))} />
+            </label>
+          </div>
+        ) : (
+          <div className="preference-fields">
+            <label>
+              <span>iPhone Use 專案位置</span>
+              <input value={runtime.iphoneUseRoot} onChange={(event) => setRuntime((value) => ({ ...value, iphoneUseRoot: event.target.value }))} />
+            </label>
+            <label>
+              <span>Python 指令或執行檔</span>
+              <input value={runtime.iphoneUsePython} onChange={(event) => setRuntime((value) => ({ ...value, iphoneUsePython: event.target.value }))} />
+            </label>
+          </div>
+        )}
         <button className="button primary" disabled={!!busy} onClick={() => void onAction("runtime-settings", async () => {
           await api("runtime-settings", "PATCH", {
             model: runtime.model,
@@ -127,6 +161,9 @@ export function SettingsView({
             shinyReviewConcurrency: runtime.shinyReviewConcurrency,
             iphoneUseRoot: runtime.iphoneUseRoot,
             iphoneUsePython: runtime.iphoneUsePython,
+            phoneBackend: runtime.phoneBackend,
+            deviceMcpExecutable: runtime.deviceMcpExecutable,
+            deviceMcpDevice: runtime.deviceMcpDevice,
             ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
             ...(clearApiKey ? { clearApiKey: true } : {}),
           });

@@ -10,6 +10,7 @@ import {
 } from "@/lib/iphone-data";
 import { resumableTransferIndexes } from "@/lib/iphone-resume";
 import { scanTiming } from "@/lib/scan-timing";
+import type { PhoneBackend } from "@/lib/runtime-config";
 import { json } from "./http";
 
 export function iphoneStatus() {
@@ -18,6 +19,7 @@ export function iphoneStatus() {
     ready: boolean;
     message: string;
     version: string | null;
+    backend?: PhoneBackend;
   }>("settings", "iphone-worker");
   const selectedScan = activeScan() || scans()[0] || null;
   const selectedItems = selectedScan ? scanItems(selectedScan.id) : [];
