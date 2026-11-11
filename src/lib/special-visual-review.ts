@@ -8,7 +8,7 @@ import { upperAppearanceImage } from "./shiny-review";
 import { get, put } from "./store";
 import type { Fields, Snapshot } from "./types";
 
-const promptVersion = "special-visual-two-frame-v3";
+const promptVersion = "special-visual-two-frame-v4";
 const state = z.enum(["normal", "shadow", "purified", "uncertain"]);
 const resultSchema = z.object({
   top: state,
@@ -73,7 +73,7 @@ export async function reviewSpecialVisual(
   if (judgment) onUsage({ input: 0, output: 0, cached: true });
   else {
     const client = openAiClient({ maxRetries: 0, timeout: 90000 });
-    const instruction = `你只判斷同一隻 Pokémon GO 寶可夢的暗影、淨化或一般外觀。第一張是能力頁，第二張是隊長評價頁；兩張來自不同時刻。請分別判斷兩張，不要用物種名稱、招式、CP、最愛星、天氣背景或評價師衣服推測。暗影需看見緊貼寶可夢的紫色煙霧／火焰等明確效果；淨化需看見緊貼本體的白色淨化光環或標記。服裝、氣球、繩索、背包、翅膀與它們的藍白色部件不是淨化效果；無法區分時判 uncertain。隊長評價頁常有大片黃色、白色圓形背景光斑；它們與寶可夢輪廓分離時不是淨化效果，也不妨礙判 normal。若寶可夢本體及緊貼本體的效果區清楚可見、沒有兩類特殊效果，可以判 normal。只有本體或緊貼本體的效果區被遮住、切掉、模糊，或光圈確實包住本體而無法分辨時，才判 uncertain 並設 clear=false。右側淺色遮罩是刻意遮住日期，不是特殊效果。只用畫面證據，不推測未顯示內容，不輸出日期或玩家資訊。`;
+    const instruction = `你只判斷同一隻 Pokémon GO 寶可夢的暗影、淨化或一般外觀。第一張是能力頁，第二張是隊長評價頁；兩張來自不同時刻。請分別判斷兩張，不要用物種名稱、招式、CP、最愛星、天氣背景或評價師衣服推測。暗影需看見緊貼寶可夢的紫色煙霧／火焰等明確效果；淨化需看見緊貼本體的白色淨化光環或標記。服裝、氣球、繩索、背包、翅膀與它們的藍白色部件不是淨化效果；無法區分時判 uncertain。隊長評價頁常有大片黃色、白色圓形背景光斑；它們與寶可夢輪廓分離時不是淨化效果，也不妨礙判 normal。若寶可夢本體及緊貼本體的效果區清楚可見、沒有兩類特殊效果，可以判 normal。只有本體或緊貼本體的效果區被遮住、切掉、模糊，或光圈確實包住本體而無法分辨時，才判 uncertain 並設 clear=false。只用畫面證據，不推測未顯示內容，不輸出玩家或訓練家名稱。`;
     for (let attempt = 0; attempt < 3; attempt++) {
       signal.throwIfAborted();
       try {

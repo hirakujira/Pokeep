@@ -77,7 +77,6 @@ export function phoneVisionBottom(target: Target | null) {
 export async function inspectPhoneImage(
   file: string,
   target: Target | null,
-  redactLocation = false,
 ): Promise<PhonePage> {
   if (!getRuntimeConfig().apiKey)
     throw new Error("自動掃描需要先到網頁「設定」頁填入 API key");
@@ -86,31 +85,15 @@ export async function inspectPhoneImage(
     throw new Error("僅支援直式 iPhone 畫面");
   const top = Math.floor(meta.height * 0.055),
     bottom = Math.floor(meta.height * phoneVisionBottom(target));
-  let imagePipeline = sharp(await fs.readFile(file)).extract({
-    left: 0,
-    top,
-    width: meta.width,
-    height: bottom - top,
-  });
-  if (redactLocation) {
-    const maskTop = Math.floor(meta.height * 0.71) - top;
-    const maskBottom = Math.floor(meta.height * 0.89) - top;
-    imagePipeline = imagePipeline.composite([
-      {
-        input: {
-          create: {
-            width: meta.width,
-            height: maskBottom - maskTop,
-            channels: 3,
-            background: "#f0f4ee",
-          },
-        },
-        left: 0,
-        top: maskTop,
-      },
-    ]);
-  }
-  const image = await imagePipeline.jpeg({ quality: 85 }).toBuffer();
+  const image = await sharp(await fs.readFile(file))
+    .extract({
+      left: 0,
+      top,
+      width: meta.width,
+      height: bottom - top,
+    })
+    .jpeg({ quality: 85 })
+    .toBuffer();
   const client = openAiClient({
     maxRetries: 1,
     timeout: 90000,
@@ -125,7 +108,7 @@ export async function inspectPhoneImage(
         content: [
           {
             type: "input_text",
-            text: `${redactLocation ? "畫面下方的淺色矩形是為隱私遮蔽捕獲地點，不是遊戲彈窗，不要因此設定 hasUnexpectedOverlay。" : ""}${target ? `判斷畫面；定位目標 ${target}：${targetDescriptions[target] || target}。僅在目標真的可見時提供座標。` : "判斷畫面與數量；不需定位目標。"}`,
+            text: `${target ? `判斷畫面；定位目標 ${target}：${targetDescriptions[target] || target}。僅在目標真的可見時提供座標。` : "判斷畫面與數量；不需定位目標。"}`,
           },
           {
             type: "input_image",

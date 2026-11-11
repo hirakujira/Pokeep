@@ -108,17 +108,9 @@ export function readLocalOcr(paths: string[]) {
   return localOcr.read(paths);
 }
 
-export function formatOcrLines(lines: OcrLine[], frame: "top" | "moves" | "appraisal") {
+export function formatOcrLines(lines: OcrLine[]) {
   return lines
-    .filter((line) => {
-      if (!line.text.trim()) return false;
-      if (frame === "moves" && line.y < 0.1) return false;
-      if (/^(?:20\d{2}|\d{1,2}[\/.]\d{1,2}|\d{4}[\/-]\d{1,2})$/.test(line.text.trim()))
-        return false;
-      if (/在.+捉到|捕獲地點|caught at/i.test(line.text))
-        return false;
-      return true;
-    })
+    .filter((line) => line.text.trim())
     .sort((a, b) => b.y - a.y || a.x - b.x)
     .map((line) => `[${Math.round(line.x * 100)},${Math.round(line.y * 100)}] ${line.text}`)
     .join("\n");

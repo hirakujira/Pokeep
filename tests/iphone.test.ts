@@ -669,7 +669,7 @@ test("已存色違複核能修復單一欄位差異，人工修正仍優先", ()
   }
 });
 
-test("外觀裁圖保留寶可夢右側身體，仍遮住日期徽章", async () => {
+test("外觀裁圖保留寶可夢右側身體與日期徽章，不再遮罩", async () => {
   const file = path.join(temp, "appearance-crop.jpg");
   await sharp({ create: { width: 600, height: 1200, channels: 3, background: "#000000" } })
     .composite([
@@ -685,19 +685,18 @@ test("外觀裁圖保留寶可夢右側身體，仍遮住日期徽章", async ()
   const body = at(510, 410);
   const date = at(510, 500);
   assert.ok(body[0] > 180 && body[1] < 80, `身體被遮住：${body}`);
-  assert.ok(date.every((channel) => channel > 220), `日期未被遮住：${date}`);
+  assert.ok(date[0] > 180 && date[2] < 80, `日期被遮住：${date}`);
 });
 
-test("本機 OCR 傳出文字前移除日期與招式頁底部地點", () => {
+test("本機 OCR 保留捕獲日期與地點", () => {
   const lines = [
     { text: "CP661", confidence: 1, x: 0.35, y: 0.96 },
     { text: "2021", confidence: 1, x: 0.87, y: 0.63 },
     { text: "02/21", confidence: 1, x: 0.87, y: 0.6 },
     { text: "在地圖上捉到", confidence: 1, x: 0.2, y: 0.01 },
   ];
-  assert.match(formatOcrLines(lines, "top"), /CP661/);
-  assert.doesNotMatch(formatOcrLines(lines, "top"), /2021|02\/21/);
-  assert.doesNotMatch(formatOcrLines(lines, "moves"), /在地圖上捉到/);
+  const text = formatOcrLines(lines);
+  for (const kept of [/CP661/, /2021/, /02\/21/, /在地圖上捉到/]) assert.match(text, kept);
 });
 
 test("離線辨識至多三隻並行，仍依掃描順序寫入", async () => {
