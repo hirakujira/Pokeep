@@ -18,6 +18,13 @@ export function transferProgress(batch: TransferBatch, records: Pokemon[]) {
     ["submitted", "confirmed", "skipped", "uncertain"].includes(entry.status),
   ).length;
   const skipped = batch.entries.filter((entry) => entry.status === "skipped").length;
+  // Only a dialog after YES leaves an entry both sent and skipped.
+  const declined = batch.entries.flatMap((entry) => {
+    if (entry.status !== "skipped" || !entry.sentAt) return [];
+    const pokemon = records.find((row) => row.id === entry.pokemonId);
+    const f = pokemon && effective(pokemon);
+    return [f ? `${displayPokemonName(f.name || f.speciesId || "寶可夢", f.costume, f.speciesId)} · CP ${f.cp ?? "?"}` : "寶可夢"];
+  });
   const activeEntry = batch.entries.find((entry) =>
     ["searching", "prepared", "sent", "unfavoriting"].includes(entry.status),
   );
@@ -45,6 +52,7 @@ export function transferProgress(batch: TransferBatch, records: Pokemon[]) {
     skippablePokemon,
     processed,
     skipped,
+    declined,
     activeName,
     activeStage,
     statusLabel,
@@ -85,6 +93,11 @@ export function BatchProgressPanel({
           .filter(Boolean).join("、") || "未選"}
       </p>
       {batch.error && <p className="job-error">{batch.error}</p>}
+      {progress.declined.length > 0 && (
+        <p className="muted">
+          按 YES 後出現額外確認而未放生：{progress.declined.join("、")}
+        </p>
+      )}
       {progress.resumableCount > 0 && (
         <p className="muted">
           {progress.skippableIndex !== null

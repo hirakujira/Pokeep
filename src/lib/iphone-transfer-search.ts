@@ -1,10 +1,5 @@
 import type { OcrLine } from "./local-ocr";
 import { effective, type Pokemon, type Snapshot } from "./types";
-import {
-  defaultTransferSearchFilters,
-  transferSearchQuery,
-  type TransferSearchFilter,
-} from "./transfer-search-filters";
 
 export type CpCandidate = {
   cp: number;
@@ -38,82 +33,6 @@ export function collectionSearchState(lines: OcrLine[]): "empty" | "active" | nu
     return boxCount ? "empty" : null;
   }
   return search.text.includes("搜尋") ? "empty" : "active";
-}
-
-export function searchQueryMatches(lines: OcrLine[], dex: number): boolean {
-  const search = lines.find(
-    (line) => line.x > 0.1 && line.x < 0.65 && line.y > 0.78 && line.y < 0.85,
-  );
-  if (search && /[&!a-z]/i.test(search.text.replace(/^[Qq]\s*/, ""))) return false;
-  const digits = search?.text.match(/[0-9]+/g);
-  // Vision may read the magnifying-glass icon as a stray one-digit number.
-  return Boolean(
-    digits &&
-    digits.at(-1) === String(dex) &&
-    digits.slice(0, -1).every((part) => part.length === 1) &&
-    digits.length <= 2,
-  );
-}
-
-/** Keep background Pokémon out of the result list used for transfer. */
-export function nonBackgroundQuery(dex: number) {
-  return transferSearchQuery(dex);
-}
-
-export function transferQueryMatches(
-  lines: OcrLine[], dex: number, selected: readonly TransferSearchFilter[],
-) {
-  if (selected.length === 0) return searchQueryMatches(lines, dex);
-  const search = lines.find((line) =>
-    line.x > 0.1 && line.x < 0.65 && line.y > 0.78 && line.y < 0.85,
-  );
-  return search ? transferQueryTextMatches(search.text, dex, selected) : false;
-}
-
-function transferQueryTextMatches(
-  value: string, dex: number, selected: readonly TransferSearchFilter[],
-) {
-  const text = value.normalize("NFKC").toLowerCase().replace(/\s/g, "");
-  const query = transferSearchQuery(dex, selected).toLowerCase();
-  if (!text.endsWith(query)) return false;
-  return ["", "q", "⌕", "🔍"].includes(text.slice(0, -query.length));
-}
-
-export function nonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
-  return transferQueryMatches(lines, dex, defaultTransferSearchFilters);
-}
-
-export function croppedTransferQueryMatches(
-  lines: OcrLine[], dex: number, selected: readonly TransferSearchFilter[],
-) {
-  const visible = lines.filter((line) => line.text.trim());
-  return visible.length === 1 && transferQueryTextMatches(visible[0].text, dex, selected);
-}
-
-/** Cropped search text has no magnifier prefix or position in the full frame. */
-export function croppedNonBackgroundQueryMatches(lines: OcrLine[], dex: number) {
-  return croppedTransferQueryMatches(lines, dex, defaultTransferSearchFilters);
-}
-
-export function croppedTransferQueryConsensus(
-  readings: OcrLine[][], dex: number, selected: readonly TransferSearchFilter[],
-) {
-  return readings.length === 3 &&
-    readings.filter((lines) => croppedTransferQueryMatches(lines, dex, selected)).length >= 2;
-}
-
-export function croppedNonBackgroundConsensus(readings: OcrLine[][], dex: number) {
-  return croppedTransferQueryConsensus(readings, dex, defaultTransferSearchFilters);
-}
-
-export function croppedBackgroundTextCompatible(readings: OcrLine[][], dex: number) {
-  const query = `${dex}&背卡`;
-  return readings.some((lines) => {
-    const visible = lines.map((line) => line.text.normalize("NFKC").replace(/\s/g, ""))
-      .filter(Boolean);
-    return visible.length === 1 &&
-      visible[0].replace(/[!.]/g, "") === query;
-  });
 }
 
 /** Look up rare backgrounds with a positive query before the ordinary dex search. */
@@ -194,6 +113,43 @@ export function standardTransferDialog(lines: OcrLine[]): boolean {
   );
 }
 
+const cancelLabels = new Set(["NO", "ZO", "N0", "否", "取消"]);
+const buttonLabel = (line: OcrLine) => line.text.replace(/\s+/g, "").toUpperCase();
+const inDialog = (line: OcrLine) =>
+  line.x > 0.2 && line.x < 0.75 && line.y > 0.15 && line.y < 0.8;
+
+/** The cancel button of any confirmation dialog, as a tap point; never the confirm button. */
+export function dialogCancelPoint(lines: OcrLine[]): { x: number; y: number } | null {
+  const buttons = lines.filter((line) =>
+    cancelLabels.has(buttonLabel(line)) && inDialog(line),
+  );
+  if (buttons.length !== 1) return null;
+  // Vision reports the lower-left corner of the text, with y measured from the bottom.
+  return { x: buttons[0].x + 0.03, y: 1 - buttons[0].y - 0.008 };
+}
+
+const menuLabels = new Set(["寶可夢圖鑑", "道具", "我的最愛", "調查寶可夢", "傳送"]);
+
+/** The Pokémon's ≡ menu, whose entries stand right of centre. */
+export function pokemonMenuOpen(lines: OcrLine[]) {
+  const labels = new Set(lines
+    .filter((line) => line.x > 0.4 && line.y > 0.1 && line.y < 0.8)
+    .map((line) => line.text.replace(/\s+/g, ""))
+    .filter((label) => menuLabels.has(label)));
+  return labels.size >= 2;
+}
+
+/** A dialog's wording from top to bottom, without its YES and NO buttons. */
+export function dialogText(lines: OcrLine[]) {
+  return lines
+    .filter((line) =>
+      line.text.trim() && line.y > 0.15 && line.y < 0.85 &&
+      !(inDialog(line) && (cancelLabels.has(buttonLabel(line)) || buttonLabel(line) === "YES")),
+    )
+    .sort((a, b) => b.y - a.y || a.x - b.x)
+    .map((line) => line.text.trim())
+    .join(" ");
+}
 /** Pokémon GO box cards put CP above the sprite in a three-column grid. */
 export function cpCandidates(lines: OcrLine[]): CpCandidate[] {
   const found: CpCandidate[] = [];

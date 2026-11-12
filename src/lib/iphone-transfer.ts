@@ -1,9 +1,4 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import sharp from "sharp";
 import type { PhoneConnection } from "./phone-connection";
-import { hasBackgroundExclamationGlyph } from "./iphone-query-glyph";
 import {
   ensureReady,
   observe,
@@ -23,40 +18,59 @@ import {
   transferSearchQuery,
   type TransferSearchFilter,
 } from "./transfer-search-filters";
-import { readLocalOcr } from "./local-ocr";
+import { readLocalOcr, type OcrLine } from "./local-ocr";
 import {
   assertUniqueDexCp,
-  backgroundQuery,
-  backgroundQueryMatches,
   collectionSearchState,
   cpCandidates,
-  croppedBackgroundTextCompatible,
-  croppedTransferQueryConsensus,
-  nonBackgroundQuery,
-  searchQueryMatches,
+  detailCp,
+  dialogCancelPoint,
+  dialogText,
+  pokemonMenuOpen,
   searchResultCount,
   standardTransferDialog,
-  transferQueryMatches,
 } from "./iphone-transfer-search";
 
-class SkippedCandidate extends Error {}
+type Screen = Awaited<ReturnType<typeof observe>>;
+type Wait = (milliseconds: number) => Promise<void>;
+
+const sleep: Wait = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+const ocr = async (file: string) => (await readLocalOcr([file]))[0];
+
+class SkippedCandidate extends Error {
+  /** Dex whose search results are still on screen after the skip. */
+  readonly shownDex: number | null;
+  constructor(message: string, shownDex: number | null = null) {
+    super(message);
+    this.shownDex = shownDex;
+  }
+}
 
 // Supported portrait layout, calibrated on Gjallarhorn. The final tap is
-// always preceded by a durable sent journal entry and a local OCR prompt check.
+// always preceded by a durable sent journal entry; the screen is read after it.
 const transferPoint = {
   search: { x: 0.5, y: 0.177 },
-  clearSearch: { x: 0.92, y: 0.177 },
   backToBox: { x: 0.095, y: 0.177 },
   confirmSearch: { x: 0.752, y: 0.588 },
   favorite: { x: 0.9, y: 0.077 },
+  // The open menu's X takes the place of its button.
   menu: { x: 0.865, y: 0.94 },
   transfer: { x: 0.74, y: 0.854 },
   confirm: { x: 0.5, y: 0.534 },
+  closeDetail: { x: 0.5, y: 0.94 },
 } as const;
+// YES is tapped without reading the prompt. On Gungnir the prompt is drawn
+// about 150 ms after 傳送 and takes a tap by 350 ms; a lost YES leaves the
+// prompt up, which settleAfterConfirm reports for NO.
+const CONFIRM_DELAY_MS = 700;
+// Dialogs, the menu and the detail page finish closing within about 300 ms.
+// Reading sooner can show the old screen and repeat a tap on the new one.
+const CLOSE_SETTLE_MS = 700;
 
 async function tapFast(
   phone: PhoneConnection,
-  observation: Awaited<ReturnType<typeof observe>>,
+  observation: Screen,
   point: { x: number; y: number },
 ) {
   if (!observation.image) throw new Error("沒有可用於點擊的手機截圖尺寸");
@@ -70,9 +84,8 @@ async function tapFast(
 
 export async function observeGameForeground(
   phone: PhoneConnection,
-  first: Awaited<ReturnType<typeof observe>>,
-  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
-    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  first: Screen,
+  wait: Wait = sleep,
 ) {
   let current = first;
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -85,131 +98,137 @@ export async function observeGameForeground(
   throw new Error("Pokémon GO 暫時不是前景 App；已暫停放生，請回到寶可夢盒");
 }
 
-/** Recover only post-transfer navigation. The irreversible transfer tap is never replayed. */
-export async function settleAfterSubmitted(
+/** Leaves the search for the whole box with "<". */
+export async function leaveSearch(
   phone: PhoneConnection,
-  dialog: Awaited<ReturnType<typeof observe>>,
-  keepSearch: boolean,
-  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
-    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  screen: Screen,
+  wait: Wait = sleep,
 ) {
-  await wait(700);
-  if (!keepSearch) {
-    try {
-      await tapFast(phone, dialog, transferPoint.backToBox);
-    } catch (error) {
-      const failure = error as Error & { code?: string; uncertain?: boolean };
-      if (failure.code !== "stale_observation" || failure.uncertain !== false)
-        throw error;
-      // The old-screen tap was explicitly rejected before execution. Wait
-      // through a notification, then retry this navigation tap from a new frame.
-      const fresh = await observeGameForeground(phone, await observe(phone), wait);
-      await tapFast(phone, fresh, transferPoint.backToBox);
-    }
+  try {
+    await tapFast(phone, screen, transferPoint.backToBox);
+  } catch (error) {
+    const failure = error as Error & { code?: string; uncertain?: boolean };
+    if (failure.code !== "stale_observation" || failure.uncertain !== false)
+      throw error;
+    // The old-screen tap was explicitly rejected before execution. Wait
+    // through a notification, then retry this navigation tap from a new frame.
+    const fresh = await observeGameForeground(phone, await observe(phone), wait);
+    await tapFast(phone, fresh, transferPoint.backToBox);
   }
   return observeGameForeground(phone, await observe(phone), wait);
 }
 
-/** A skipped detail may still be open. Leave it before searching the next entry. */
+/**
+ * The screen is first read after YES. The box list without the transferred
+ * CP means the transfer went through; a dialog with a cancel button on two
+ * reads in a row is a further confirmation, or the first prompt if YES was
+ * lost. Pokémon GO keeps its menu up for seconds while the server answers.
+ */
+export async function settleAfterConfirm(
+  phone: PhoneConnection,
+  transferredCp: number,
+  wait: Wait = sleep,
+  read: (file: string) => Promise<OcrLine[]> = ocr,
+) {
+  let lastCancel: { x: number; y: number } | null = null;
+  let stillListed = false;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    await wait(attempt === 0 ? 300 : 500);
+    const screen = await observeGameForeground(phone, await observe(phone), wait);
+    if (!screen.image?.path) throw new Error("放生後手機畫面沒有可讀截圖");
+    const lines = await read(screen.image.path);
+    stillListed = false;
+    if (collectionSearchState(lines)) {
+      lastCancel = null;
+      // A frame from before the list refreshed still shows the old layout.
+      if (!cpCandidates(lines).some((candidate) => candidate.cp === transferredCp))
+        return { kind: "list" as const, observation: screen, lines };
+      stillListed = true;
+      continue;
+    }
+    const cancel = dialogCancelPoint(lines);
+    if (
+      cancel && lastCancel &&
+      Math.abs(cancel.x - lastCancel.x) < 0.03 &&
+      Math.abs(cancel.y - lastCancel.y) < 0.03
+    )
+      return {
+        kind: "dialog" as const,
+        observation: screen,
+        lines,
+        cancel,
+        standard: standardTransferDialog(lines),
+      };
+    lastCancel = cancel;
+  }
+  throw new Error(
+    stillListed
+      ? "點擊放生後列表仍顯示這隻的 CP"
+      : "點擊放生後沒有回到寶可夢列表",
+  );
+}
+
+/**
+ * NO on a transfer prompt leaves the Pokémon's menu open over its detail
+ * page. Close what is on top (a dialog with its cancel button, then the menu
+ * and the detail page with their X) until the box list shows.
+ */
 export async function returnToBoxAfterSkip(
   phone: PhoneConnection,
-  first: Awaited<ReturnType<typeof observe>>,
-  readLines: (path: string) => Promise<Awaited<ReturnType<typeof readLocalOcr>>[number]> =
-    async (path) => (await readLocalOcr([path]))[0],
+  first: Screen,
+  readLines: (path: string) => Promise<OcrLine[]> = ocr,
+  wait: Wait = sleep,
 ) {
-  let current = await observeGameForeground(phone, first);
-  const inBox = async (screen: typeof current) => {
-    if (!screen.image?.path) throw new Error("跳過後手機畫面沒有可讀截圖");
-    return collectionSearchState(await readLines(screen.image.path)) !== null;
-  };
-  if (await inBox(current)) return current;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      await tapFast(phone, current, transferPoint.backToBox);
-      break;
-    } catch (error) {
-      const failure = error as Error & { code?: string; uncertain?: boolean };
-      if (attempt !== 0 || failure.code !== "stale_observation" ||
-          failure.uncertain !== false) throw error;
-      current = await observeGameForeground(phone, await observe(phone));
-      if (await inBox(current)) return current;
+  let current = await observeGameForeground(phone, first, wait);
+  for (let step = 0; step < 6; step++) {
+    if (!current.image?.path) throw new Error("跳過後手機畫面沒有可讀截圖");
+    const lines = await readLines(current.image.path);
+    if (collectionSearchState(lines) !== null) return current;
+    const close = dialogCancelPoint(lines) ?? (
+      pokemonMenuOpen(lines) ? transferPoint.menu
+        : detailCp(lines) !== null ? transferPoint.closeDetail
+        : null
+    );
+    if (close) {
+      try {
+        await tapFast(phone, current, close);
+      } catch (error) {
+        const failure = error as Error & { code?: string; uncertain?: boolean };
+        // Rejected before it ran, e.g. under a notification: read again.
+        if (failure.code !== "stale_observation" || failure.uncertain !== false)
+          throw error;
+      }
     }
-  }
-  for (let attempt = 0; attempt < 3; attempt++) {
-    current = await observeGameForeground(phone, await observe(phone));
-    if (await inBox(current)) return current;
+    await wait(CLOSE_SETTLE_MS);
+    current = await observeGameForeground(phone, await observe(phone), wait);
   }
   throw new Error("跳過後按 X 未回到寶可夢盒子列表；請查看手機畫面後再繼續");
 }
 
 async function waitForSearchScreen(phone: PhoneConnection) {
-  await observeGameForeground(phone, await observe(phone));
+  return observeGameForeground(phone, await observe(phone));
 }
 
-/** Full-frame OCR sometimes drops the thin !. Re-read only the search text. */
-export async function confirmNonBackgroundQuery(
-  imagePath: string,
-  lines: Awaited<ReturnType<typeof readLocalOcr>>[number],
-  dex: number,
-  extras: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
-) {
-  if (transferQueryMatches(lines, dex, extras)) return true;
-  const onlyBackground = extras.length === 1 && extras[0] === "background";
-  if (onlyBackground && backgroundQueryMatches(lines, dex) &&
-      await hasBackgroundExclamationGlyph(imagePath)) return true;
-  const metadata = await sharp(imagePath).metadata();
-  if (!metadata.width || !metadata.height) return false;
-  const region = {
-    // Include the first digit of short dex numbers. The magnifier may OCR as Q.
-    left: Math.round(metadata.width * 0.13),
-    top: Math.round(metadata.height * 0.155),
-    width: Math.round(metadata.width * 0.76),
-    height: Math.round(metadata.height * 0.052),
-  };
-  const folder = await fs.mkdtemp(path.join(os.tmpdir(), "pokekeep-query-"));
-  try {
-    const plain = path.join(folder, "plain.png");
-    const normalized = path.join(folder, "normalized.png");
-    const sharpened = path.join(folder, "sharpened.png");
-    await Promise.all([
-      sharp(imagePath).extract(region).resize({ width: region.width * 3 }).png().toFile(plain),
-      sharp(imagePath).extract(region).resize({ width: region.width * 3 })
-        .grayscale().normalise().png().toFile(normalized),
-      sharp(imagePath).extract(region).resize({ width: region.width * 3 })
-        .grayscale().normalise().sharpen().png().toFile(sharpened),
-    ]);
-    const cropped = await readLocalOcr([plain, normalized, sharpened]);
-    if (croppedTransferQueryConsensus(cropped, dex, extras)) return true;
-    return onlyBackground && croppedBackgroundTextCompatible(cropped, dex) &&
-      await hasBackgroundExclamationGlyph(imagePath);
-  } finally {
-    await fs.rm(folder, { recursive: true, force: true });
-  }
-}
-
+/** Not read back: OCR of the query was slow and misread `!`. The unique dex+CP check still guards the tap. */
 async function submitSearch(
-  phone: PhoneConnection, dex: number, background: boolean | "exclude-background",
-  extras: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
+  phone: PhoneConnection, screen: Screen,
 ) {
-  let observed = "搜尋欄未讀到文字";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt) await new Promise((resolve) => setTimeout(resolve, 150));
-    const screen = await observeGameForeground(phone, await observe(phone));
-    if (!screen.image?.path) throw new Error("搜尋輸入後沒有可讀畫面");
-    const [lines] = await readLocalOcr([screen.image.path]);
-    observed = lines.find((line) => line.x > 0.1 && line.x < 0.88 &&
-      line.y > 0.76 && line.y < 0.86)?.text || "搜尋欄未讀到文字";
-    const matches = background === "exclude-background"
-      ? await confirmNonBackgroundQuery(screen.image.path, lines, dex, extras)
-      : background ? backgroundQueryMatches(lines, dex) : searchQueryMatches(lines, dex);
-    if (matches) {
-      await tapFast(phone, screen, transferPoint.confirmSearch);
-      return;
-    }
+  await tapFast(phone, screen, transferPoint.confirmSearch);
+}
+
+/** iOS's paste banner covers the result count for a moment after a pasted query. */
+export async function observeSearchResults(
+  phone: PhoneConnection,
+  wait: Wait = sleep,
+  read: (file: string) => Promise<OcrLine[]> = ocr,
+) {
+  for (let attempt = 0; ; attempt++) {
+    const result = await observe(phone);
+    if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
+    const lines = await read(result.image.path);
+    if (searchResultCount(lines) !== null || attempt === 5) return { result, lines };
+    await wait(500);
   }
-  throw new Error(
-    `無法確認搜尋欄；預期「${background === "exclude-background" ? transferSearchQuery(dex, extras) : background ? backgroundQuery(dex) : dex}」，畫面辨識為「${observed}」，尚未送出搜尋`,
-  );
 }
 
 function setEntry(
@@ -227,50 +246,25 @@ function setEntry(
   return next;
 }
 
-async function findCandidateByDexCp(
+async function locateCp(
   phone: PhoneConnection,
-  current: Awaited<ReturnType<typeof observe>>,
+  first: Screen,
+  firstLines: OcrLine[],
   dex: number,
   cp: number,
   batchId: string,
   index: number,
-  reuseSearch: boolean,
-  extras: readonly TransferSearchFilter[],
 ) {
-  if (!current.image?.path) throw new Error("寶可夢盒子沒有可讀截圖");
-  const [initialLines] = await readLocalOcr([current.image.path]);
-  const searchState = collectionSearchState(initialLines);
-  if (!searchState)
-    throw new Error("請先在寶可夢盒子列表開始逐隻放生");
-  let result = current;
-  let lines = initialLines;
-  if (!result.image?.path) throw new Error("搜尋畫面沒有可讀截圖");
-  const currentSearchState = collectionSearchState(lines);
-  if (!currentSearchState)
-    throw new Error("無法確認仍在寶可夢盒子，尚未放生");
-  if (!reuseSearch || currentSearchState !== "active" ||
-      !await confirmNonBackgroundQuery(result.image.path, lines, dex, extras)) {
-    if (currentSearchState === "active")
-      await tapFast(phone, result, transferPoint.clearSearch);
-    await tapFast(phone, result, transferPoint.search);
-    await typeFilteredSearch(phone, dex, extras);
-    result = await observe(phone);
-    if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
-    [lines] = await readLocalOcr([result.image.path]);
-  }
-  if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
-  if (!await confirmNonBackgroundQuery(result.image.path, lines, dex, extras))
-    throw new Error("搜尋欄未顯示完整圖鑑編號與所選排除條件，尚未放生");
+  let result = first;
+  let lines = firstLines;
   const count = searchResultCount(lines);
   if (count === null)
     throw new Error("無法讀取圖鑑編號的搜尋結果數量");
   if (count === 0)
-    throw new SkippedCandidate("目前搜尋排除條件下沒有此物種，已跳過且未放生");
+    throw new SkippedCandidate("目前搜尋排除條件下沒有此物種，已跳過且未放生", dex);
   let previous = "";
   for (let attempt = 0; attempt < 20; attempt++) {
     if (!result.image?.path) throw new Error("搜尋結果沒有可讀截圖");
-    if (!await confirmNonBackgroundQuery(result.image.path, lines, dex, extras))
-      throw new Error("搜尋結果已失去所選排除條件，尚未放生");
     const visible = cpCandidates(lines);
     const matches = visible.filter((candidate) => candidate.cp === cp);
     if (matches.length > 1)
@@ -289,9 +283,9 @@ async function findCandidateByDexCp(
     }
     const signature = visible.map((candidate) => `${candidate.cp}:${candidate.x}:${candidate.y}`).join("|");
     if (signature === previous)
-      throw new SkippedCandidate("目標 CP 未出現在搜尋結果，已跳過且未放生");
+      throw new SkippedCandidate("目標 CP 未出現在搜尋結果，已跳過且未放生", dex);
     previous = signature;
-    const swiped = await phone.call<{ observation?: Awaited<ReturnType<typeof observe>> }>(
+    const swiped = await phone.call<{ observation?: Screen }>(
       "swipe",
       {
         direction: "up",
@@ -304,9 +298,53 @@ async function findCandidateByDexCp(
       ? swiped.observation
       : await observe(phone);
     if (!result.image?.path) throw new Error("搜尋翻頁沒有回傳截圖");
-    [lines] = await readLocalOcr([result.image.path]);
+    lines = await ocr(result.image.path);
   }
-  throw new SkippedCandidate("無法確認目標位於搜尋結果，已跳過且未放生");
+  throw new SkippedCandidate("無法確認目標位於搜尋結果，已跳過且未放生", dex);
+}
+
+async function findCandidateByDexCp(
+  phone: PhoneConnection,
+  current: Screen,
+  knownLines: OcrLine[] | null,
+  dex: number,
+  cp: number,
+  batchId: string,
+  index: number,
+  reuseSearch: boolean,
+  extras: readonly TransferSearchFilter[],
+) {
+  if (!current.image?.path) throw new Error("寶可夢盒子沒有可讀截圖");
+  let result = current;
+  let lines = knownLines || await ocr(current.image.path);
+  const searchState = collectionSearchState(lines);
+  if (!searchState)
+    throw new Error("請先在寶可夢盒子列表開始逐隻放生");
+  const search = async () => {
+    if (collectionSearchState(lines) === "active") {
+      result = await leaveSearch(phone, result);
+      if (!result.image?.path) throw new Error("寶可夢盒子沒有可讀截圖");
+      lines = await ocr(result.image.path);
+      if (collectionSearchState(lines) !== "empty")
+        throw new Error("無法離開目前的搜尋，尚未放生");
+    }
+    await tapFast(phone, result, transferPoint.search);
+    await typeFilteredSearch(phone, dex, extras);
+    ({ result, lines } = await observeSearchResults(phone));
+  };
+  let reused = reuseSearch && searchState === "active" &&
+    searchResultCount(lines) !== null;
+  if (!reused) await search();
+  for (;;) {
+    try {
+      return await locateCp(phone, result, lines, dex, cp, batchId, index);
+    } catch (error) {
+      if (!reused || !(error instanceof SkippedCandidate)) throw error;
+      // The kept results may be scrolled past the target; search from the top.
+      reused = false;
+      await search();
+    }
+  }
 }
 
 function completeBoxIds() {
@@ -322,59 +360,20 @@ function completeBoxIds() {
     : null;
 }
 
-export async function typeNumericSearch(
-  phone: PhoneConnection,
-  dex: number,
-  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
-  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
-  submit: (phone: PhoneConnection, dex: number, background: boolean) => Promise<void> = submitSearch,
-) {
-  if (!Number.isInteger(dex) || dex < 1 || dex > 10000)
-    throw new Error("沒有可靠的圖鑑編號，無法搜尋候選");
-  await waitForScreen(phone);
-  await inject(String(dex));
-  await submit(phone, dex, false);
-}
-
-export async function typeBackgroundSearch(
-  phone: PhoneConnection,
-  dex: number,
-  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
-  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
-  submit: (phone: PhoneConnection, dex: number, background: boolean) => Promise<void> = submitSearch,
-) {
-  const query = backgroundQuery(dex);
-  await waitForScreen(phone);
-  await inject(query);
-  await submit(phone, dex, true);
-}
-
-export async function typeNonBackgroundSearch(
-  phone: PhoneConnection,
-  dex: number,
-  inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
-  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
-  submit: (phone: PhoneConnection, dex: number, background: boolean | "exclude-background") => Promise<void> = submitSearch,
-) {
-  const query = nonBackgroundQuery(dex);
-  await waitForScreen(phone);
-  await inject(query);
-  await submit(phone, dex, "exclude-background");
-}
-
 export async function typeFilteredSearch(
   phone: PhoneConnection,
   dex: number,
   extras: readonly TransferSearchFilter[],
   inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
-  waitForScreen: (phone: PhoneConnection) => Promise<void> = waitForSearchScreen,
-  submit: (phone: PhoneConnection, dex: number, extras: readonly TransferSearchFilter[]) => Promise<void> =
-    (phone, dex, extras) => submitSearch(phone, dex, "exclude-background", extras),
+  waitForScreen: (phone: PhoneConnection) => Promise<Screen> =
+    waitForSearchScreen,
+  submit: (phone: PhoneConnection, screen: Screen) => Promise<void> =
+    submitSearch,
 ) {
   const query = transferSearchQuery(dex, extras);
-  await waitForScreen(phone);
+  const screen = await waitForScreen(phone);
   await inject(query);
-  await submit(phone, dex, extras);
+  await submit(phone, screen);
 }
 
 export function authorizedTransferIndex(batch: TransferBatch) {
@@ -405,16 +404,48 @@ export function authorizedTransferIndexes(batch: TransferBatch) {
   );
 }
 
+function entryDex(
+  batch: TransferBatch,
+  index: number,
+  byId: Map<string, Pokemon>,
+  snapshot: Snapshot | null,
+) {
+  const record = byId.get(batch.entries[index].pokemonId);
+  const speciesId = record && effective(record).speciesId;
+  return (speciesId && snapshot?.species[speciesId]?.dex) || null;
+}
+
+/** Same-dex entries run back to back, in the order each dex first appears, so one search serves them all. */
+export function transferOrder(
+  batch: TransferBatch,
+  indexes: number[],
+  records: Pokemon[],
+  snapshot: Snapshot | null,
+) {
+  const byId = new Map(records.map((row) => [row.id, row]));
+  const groups = new Map<string, number[]>();
+  for (const index of indexes) {
+    const dex = entryDex(batch, index, byId, snapshot);
+    const key = dex ? `dex ${dex}` : `entry ${index}`;
+    groups.set(key, [...(groups.get(key) || []), index]);
+  }
+  return [...groups.values()].flat();
+}
+
 export function nextPendingUsesDex(
   batch: TransferBatch,
+  order: number[],
   currentIndex: number,
   dex: number,
   records: Pokemon[],
   snapshot: Snapshot | null,
 ) {
   if (batch.mode !== "bulk" || !snapshot) return false;
-  const next = batch.entries.slice(currentIndex + 1).find((entry) => entry.status === "pending");
-  const record = next && records.find((row) => row.id === next.pokemonId);
+  const next = order
+    .slice(order.indexOf(currentIndex) + 1)
+    .find((index) => batch.entries[index].status === "pending");
+  const record = next !== undefined &&
+    records.find((row) => row.id === batch.entries[next].pokemonId);
   const speciesId = record && effective(record).speciesId;
   return Boolean(
     record && !transferExclusion(record, snapshot) &&
@@ -428,7 +459,9 @@ export async function runTransferBatch(
 ) {
   let batch = get<TransferBatch>("transfer_batches", requested.id);
   if (!batch || batch.status !== "approved") return;
-  const authorizedIndexes = new Set(authorizedTransferIndexes(batch));
+  const order = transferOrder(
+    batch, authorizedTransferIndexes(batch), listPokemon(), getSnapshot(),
+  );
   assertBatchFresh(batch);
   batch = { ...batch, status: "running", updatedAt: now() };
   put("transfer_batches", batch.id, batch);
@@ -442,13 +475,14 @@ export async function runTransferBatch(
     batch = { ...latest, needsBoxReturn: false, updatedAt: now() };
     put("transfer_batches", batch.id, batch);
   }
-  let reusableDex: number | null = null;
-  for (let index = 0; index < batch.entries.length; index++) {
+  // OCR of `current` when already read, and the dex its search results show.
+  let currentLines: OcrLine[] | null = null;
+  let shownDex: number | null = null;
+  for (const index of order) {
     batch = get<TransferBatch>("transfer_batches", batch.id)!;
     if (batch.status !== "running") return;
     const entry = batch.entries[index];
     if (entry.status !== "pending") continue;
-    if (!authorizedIndexes.has(index)) continue;
     let favoriteRemoved = false;
     try {
       assertBatchFresh(batch);
@@ -474,11 +508,13 @@ export async function runTransferBatch(
       });
       let found: Awaited<ReturnType<typeof findCandidateByDexCp>>;
       for (let attempt = 0; ; attempt++) {
-        current = await observeGameForeground(phone, current);
+        const screen = await observeGameForeground(phone, current);
+        if (screen !== current) currentLines = null;
+        current = screen;
         try {
           found = await findCandidateByDexCp(
-            phone, current, identity.dex, identity.cp, batch.id, index,
-            attempt === 0 && reusableDex === identity.dex,
+            phone, current, currentLines, identity.dex, identity.cp, batch.id, index,
+            attempt === 0 && shownDex === identity.dex,
             batch.searchExclusions || defaultTransferSearchFilters,
           );
           await tapFast(phone, found.observation, found.point);
@@ -491,8 +527,11 @@ export async function runTransferBatch(
           // WDA rejected the old app/viewport context before this tap. Read
           // the screen and plan the search again; never replay a sent transfer.
           current = await observe(phone);
+          currentLines = null;
         }
       }
+      currentLines = null;
+      shownDex = identity.dex;
       batch = setEntry(batch.id, index, {
         status: "prepared",
         preparedAt: now(),
@@ -510,19 +549,7 @@ export async function runTransferBatch(
       }
       await tapFast(phone, found.observation, transferPoint.menu);
       await tapFast(phone, found.observation, transferPoint.transfer);
-      let dialog = await observe(phone);
-      let standardDialog = false;
-      for (let check = 0; check < 3; check++) {
-        if (!dialog.image?.path) throw new Error("放生確認畫面沒有截圖");
-        const [dialogLines] = await readLocalOcr([dialog.image.path]);
-        if (standardTransferDialog(dialogLines)) {
-          standardDialog = true;
-          break;
-        }
-        if (check < 2) dialog = await observe(phone);
-      }
-      if (!standardDialog)
-        throw new Error("不是一般放生確認畫面，或出現額外警告；尚未放生");
+      await sleep(CONFIRM_DELAY_MS);
       const liveBatch = get<TransferBatch>("transfer_batches", batch.id)!;
       if (
         liveBatch.status !== "running" ||
@@ -535,10 +562,61 @@ export async function runTransferBatch(
         throw new Error("放生前收藏狀態已改變");
       // Persist intent before the irreversible tap. A crash after this point is uncertain.
       batch = setEntry(batch.id, index, { status: "sent", sentAt: now() });
-      await tapFast(phone, dialog, transferPoint.confirm);
-      // The user opted out of checking the post-transfer game screen. Treat a
-      // successful tap response as submitted, not as an observed game result.
+      await tapFast(phone, found.observation, transferPoint.confirm);
       const batchId = batch.id;
+      let outcome: Awaited<ReturnType<typeof settleAfterConfirm>> | null = null;
+      let settleError: unknown = null;
+      try {
+        outcome = await settleAfterConfirm(phone, identity.cp);
+      } catch (error) {
+        settleError = error;
+      }
+      if (outcome?.kind === "dialog") {
+        const prompt = outcome.standard
+          ? "點擊 YES 後放生確認仍在"
+          : `放生時出現額外確認「${dialogText(outcome.lines).slice(0, 120)}」`;
+        const evidence = await saveCapture(outcome.observation, batchId, `${index}-extra-confirm`);
+        const kept = favoriteRemoved ? "；遊戲內最愛已取消" : "";
+        try {
+          await tapFast(phone, outcome.observation, outcome.cancel);
+        } catch (error) {
+          setEntry(batchId, index, {
+            status: "skipped",
+            reason: `${prompt}，按 NO 失敗，未放生${kept}`,
+            evidence: evidence.frame,
+          }, {
+            status: "paused",
+            selectedPokemonId: null,
+            approvedAt: null,
+            needsBoxReturn: true,
+            error: `${prompt}，按 NO 失敗；這隻未放生，請在手機按 NO 後繼續：${error instanceof Error ? error.message : "未知錯誤"}`,
+          });
+          return;
+        }
+        // NO on a confirmation keeps the Pokémon; nothing was transferred.
+        batch = setEntry(batchId, index, {
+          status: "skipped",
+          reason: `${prompt}，已按 NO 取消，未放生${kept}`,
+          evidence: evidence.frame,
+        });
+        try {
+          await sleep(CLOSE_SETTLE_MS);
+          current = await returnToBoxAfterSkip(phone, await observe(phone));
+        } catch (error) {
+          setEntry(batchId, index, {}, {
+            status: "paused",
+            selectedPokemonId: null,
+            approvedAt: null,
+            needsBoxReturn: true,
+            error: `已按 NO 取消放生，這隻未放生；返回列表失敗：${error instanceof Error ? error.message : "未知錯誤"}`,
+          });
+          return;
+        }
+        currentLines = null;
+        shownDex = null;
+        if (batch.mode !== "bulk") break;
+        continue;
+      }
       transaction(() => {
         const latest = get<Pokemon>("pokemon", record.id)!;
         put("pokemon", latest.id, { ...latest, owned: false, updatedAt: now() });
@@ -556,13 +634,19 @@ export async function runTransferBatch(
         getSettings(),
       );
       put("transfer_batches", batch.id, batch);
-      const keepSearch = nextPendingUsesDex(
-        batch, index, identity.dex, listPokemon(), getSnapshot(),
-      );
       try {
-        // Same-dex candidates can use the filtered box directly. Otherwise
-        // exit search so the next candidate starts from the unfiltered box.
-        current = await settleAfterSubmitted(phone, dialog, keepSearch);
+        if (settleError) throw settleError;
+        current = outcome!.observation;
+        currentLines = outcome!.lines;
+        if (
+          collectionSearchState(currentLines) === "active" &&
+          !nextPendingUsesDex(batch, order, index, identity.dex, listPokemon(), getSnapshot())
+        ) {
+          // The next species, or the user, starts from the whole box.
+          current = await leaveSearch(phone, current);
+          currentLines = null;
+          shownDex = null;
+        }
       } catch (error) {
         batch = setEntry(batchId, index, {
           reason: `已點擊放生並更新收藏；返回寶可夢列表失敗：${error instanceof Error ? error.message : "未知錯誤"}`,
@@ -570,7 +654,6 @@ export async function runTransferBatch(
         if (batch.mode === "bulk") throw error;
       }
       if (batch.mode !== "bulk") break;
-      reusableDex = keepSearch ? identity.dex : null;
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知錯誤";
       const latest = get<TransferBatch>("transfer_batches", batch.id)!;
@@ -580,7 +663,8 @@ export async function runTransferBatch(
         batch = setEntry(batch.id, index, { status: "skipped", reason: message });
         if (batch.mode !== "bulk") break;
         current = await observe(phone);
-        reusableDex = null;
+        currentLines = null;
+        shownDex = error.shownDex ?? shownDex;
         continue;
       }
       if (state === "submitted") {

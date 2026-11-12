@@ -18,13 +18,12 @@ const { uniqueFormFromStats, displayForm } = await import("../src/lib/iphone-for
 const { exportBackup, importBackup } = await import("../src/lib/backup");
 const { recoverInterruptedPhoneWork } =
   await import("../src/lib/iphone-recovery");
-const { typeNumericSearch, typeBackgroundSearch, typeNonBackgroundSearch, typeFilteredSearch, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, observeGameForeground, settleAfterSubmitted, returnToBoxAfterSkip } =
+const { typeFilteredSearch, observeSearchResults, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, transferOrder, observeGameForeground, leaveSearch, settleAfterConfirm, returnToBoxAfterSkip } =
   await import("../src/lib/iphone-transfer");
-const { cpCandidates, detailCp, searchResultCount, assertUniqueDexCp, standardTransferDialog, collectionSearchState, searchQueryMatches, backgroundQueryMatches, backgroundSearchDecision, nonBackgroundQuery, nonBackgroundQueryMatches, transferQueryMatches, croppedTransferQueryConsensus, croppedNonBackgroundQueryMatches, croppedNonBackgroundConsensus, croppedBackgroundTextCompatible } =
+const { cpCandidates, detailCp, searchResultCount, assertUniqueDexCp, standardTransferDialog, dialogCancelPoint, dialogText, pokemonMenuOpen, collectionSearchState, backgroundQueryMatches, backgroundSearchDecision } =
   await import("../src/lib/iphone-transfer-search");
 const { transferSearchQuery, allowedPhoneSearchQuery } =
   await import("../src/lib/transfer-search-filters");
-const { hasExclamationRun } = await import("../src/lib/iphone-query-glyph");
 const { resumableTransferIndexes } = await import("../src/lib/iphone-resume");
 const { detailFingerprint } = await import("../src/lib/iphone-fingerprint");
 const { formatOcrLines } = await import("../src/lib/local-ocr");
@@ -121,19 +120,14 @@ test("暫停批次只續跑送出前失敗與未開始的個體", () => {
       index === 1 ? { ...entry, preparedAt: "2026-10-26T00:00:00Z" } : entry,
     ),
   }), [2]);
+  assert.deepEqual(resumableTransferIndexes({ ...batch, mode: "single" }), [1]);
   assert.deepEqual(resumableTransferIndexes({
     ...batch,
     mode: "single",
-    error: "不是一般放生確認畫面，或出現額外警告；尚未放生",
     entries: batch.entries.map((entry, index) => index === 1
-      ? {
-          ...entry,
-          reason: "不是一般放生確認畫面，或出現額外警告；尚未放生",
-          preparedAt: "2026-10-26T00:00:00Z",
-          evidence: "search-cp.jpg",
-        }
+      ? { ...entry, preparedAt: "2026-10-26T00:00:00Z", evidence: "search-cp.jpg" }
       : entry),
-  }), [1]);
+  }), []);
   assert.deepEqual(resumableTransferIndexes({
     ...batch,
     entries: [...batch.entries, { pokemonId: "unknown", status: "uncertain", reason: null }],
@@ -193,7 +187,7 @@ test("前景 App 短暫切換只重新觀察；持續離開遊戲則暫停", asy
   await assert.rejects(() => observeGameForeground(away, first, async () => {}), /不是前景 App/);
 });
 
-test("放生已送出後遇通知，只重試未執行的返回列表點擊", async () => {
+test("離開搜尋遇通知時，只重試未執行的返回點擊", async () => {
   const frame = (app: string, id: string) => ({
     app, observation_id: id,
     image: { path: "/tmp/mock.png", width: 100, height: 200, pixel_to_point: [1, 1] },
@@ -220,17 +214,15 @@ test("放生已送出後遇通知，只重試未執行的返回列表點擊", as
       throw new Error(`Unexpected phone call: ${name}`);
     },
   } as unknown as IphoneMcp;
-  const result = await settleAfterSubmitted(
-    phone, frame("com.nianticlabs.pokemongo", "old"), false,
-    async (ms) => { waits.push(ms); },
-  );
+  const first = frame("com.nianticlabs.pokemongo", "old") as Awaited<ReturnType<typeof observeGameForeground>>;
+  const result = await leaveSearch(phone, first, async (ms) => { waits.push(ms); });
   assert.equal(result.observation_id, "returned");
-  assert.deepEqual(waits, [700, 1500]);
+  assert.deepEqual(waits, [1500]);
   assert.deepEqual(taps.map((tap) => tap.observation_id), ["old", "fresh"]);
   assert.ok(taps.every((tap) => tap.x === 9.5 && tap.y === 35.4));
 });
 
-test("放生後返回列表的點擊結果不明時不自動重試", async () => {
+test("離開搜尋的點擊結果不明時不自動重試", async () => {
   let taps = 0;
   const phone = {
     async call(name: string) {
@@ -243,70 +235,188 @@ test("放生後返回列表的點擊結果不明時不自動重試", async () =>
       throw new Error(`Unexpected phone call: ${name}`);
     },
   } as unknown as IphoneMcp;
-  const dialog = {
+  const list = {
     app: "com.nianticlabs.pokemongo", observation_id: "old",
     image: { path: "/tmp/mock.png", width: 100, height: 200, pixel_to_point: [1, 1] },
   } as Awaited<ReturnType<typeof observeGameForeground>>;
-  await assert.rejects(() => settleAfterSubmitted(phone, dialog, false, async () => {}), /回應不明/);
+  await assert.rejects(() => leaveSearch(phone, list, async () => {}), /回應不明/);
   assert.equal(taps, 1);
 });
 
-test("跳過後先按詳情頁 X 返回列表；已在列表時不再點 X", async () => {
+const confirmLine = (text: string, y: number, x = 0.4) => ({ text, y, x, confidence: 1 });
+const ordinaryPrompt = [
+  confirmLine("確定要將 派拉斯 傳送給博士？", 0.593),
+  confirmLine("傳送後將無法取消", 0.535),
+  confirmLine("YES", 0.457, 0.457),
+  confirmLine("NO", 0.377, 0.461),
+];
+const filteredBox = (cps: number[]) => [
+  confirmLine("寶可夢", 0.89, 0.44),
+  confirmLine("46&!背卡&!亮晶晶&!異色", 0.812, 0.2),
+  ...cps.map((cp, index) => confirmLine(`CP${cp}`, 0.72, 0.1 + 0.33 * index)),
+];
+const transferMenu = [confirmLine("寶可夢圖鑑", 0.71, 0.55), confirmLine("傳送", 0.14, 0.66)];
+
+function confirmPhone(frames: string[]) {
+  return {
+    async call(name: string) {
+      if (name !== "observe") throw new Error(`Unexpected phone call: ${name}`);
+      const id = frames.shift();
+      if (!id) throw new Error("no more frames");
+      return {
+        app: "com.nianticlabs.pokemongo", observation_id: id,
+        image: { path: id, width: 100, height: 200, pixel_to_point: [1, 1] },
+        viewport: { width: 100, height: 200 },
+      };
+    },
+  } as unknown as IphoneMcp;
+}
+
+test("按 YES 後才讀畫面：等選單與舊列表過去，列表不再有這隻 CP 才算完成", async () => {
+  const screens: Record<string, ReturnType<typeof filteredBox>> = {
+    fading: ordinaryPrompt,
+    menu: transferMenu,
+    stale: filteredBox([555, 548]),
+    done: filteredBox([548, 844]),
+  };
+  const waits: number[] = [];
+  const outcome = await settleAfterConfirm(
+    confirmPhone(["fading", "menu", "stale", "done"]), 555,
+    async (ms) => { waits.push(ms); },
+    async (id) => screens[id],
+  );
+  assert.equal(outcome.kind, "list");
+  assert.equal(outcome.observation.observation_id, "done");
+  assert.deepEqual(waits, [300, 500, 500, 500]);
+  await assert.rejects(
+    () => settleAfterConfirm(confirmPhone(Array(12).fill("stale")), 555, async () => {}, async (id) => screens[id]),
+    /列表仍顯示這隻的 CP/,
+  );
+  await assert.rejects(
+    () => settleAfterConfirm(confirmPhone(Array(12).fill("menu")), 555, async () => {}, async (id) => screens[id]),
+    /沒有回到寶可夢列表/,
+  );
+});
+
+test("按 YES 後連續兩次看到同一個確認框才回報，並給出 NO 的位置", async () => {
+  const extra = [
+    confirmLine("這隻寶可夢很特別", 0.62),
+    confirmLine("確定要傳送嗎？", 0.56),
+    confirmLine("YES", 0.457, 0.457),
+    confirmLine("NO", 0.377, 0.461),
+  ];
+  const screens: Record<string, typeof extra> = { extra, prompt: ordinaryPrompt, menu: transferMenu };
+  const read = async (id: string) => screens[id];
+  const outcome = await settleAfterConfirm(confirmPhone(["prompt", "menu", "extra", "extra"]), 555, async () => {}, read);
+  assert.equal(outcome.kind, "dialog");
+  if (outcome.kind !== "dialog") return;
+  assert.equal(outcome.observation.observation_id, "extra");
+  assert.equal(outcome.standard, false);
+  assert.ok(Math.abs(outcome.cancel.x - 0.491) < 1e-9 && Math.abs(outcome.cancel.y - 0.615) < 1e-9);
+  assert.equal(dialogText(outcome.lines), "這隻寶可夢很特別 確定要傳送嗎？");
+  const lost = await settleAfterConfirm(confirmPhone(["prompt", "prompt"]), 555, async () => {}, read);
+  assert.equal(lost.kind === "dialog" && lost.standard, true);
+});
+
+test("確認框的取消鍵只取唯一的 NO，不會取到 YES", () => {
+  assert.deepEqual(dialogCancelPoint([confirmLine("YES", 0.457, 0.457)]), null);
+  assert.deepEqual(dialogCancelPoint([...ordinaryPrompt, confirmLine("取消", 0.3, 0.45)]), null);
+  assert.deepEqual(dialogCancelPoint(transferMenu), null);
+  const point = dialogCancelPoint(ordinaryPrompt);
+  assert.ok(point && point.y > 0.6 && point.y < 0.62);
+});
+
+test("按 NO 後依序關掉確認框、選單與詳情頁回到列表；已在列表時不點", async () => {
   const frame = (id: string) => ({
     app: "com.nianticlabs.pokemongo", observation_id: id,
     image: { path: id, width: 100, height: 200, pixel_to_point: [1, 1] as [number, number] },
     viewport: { width: 100, height: 200 },
   });
-  const boxLines = [
-    { text: "寶可夢", confidence: 1, x: 0.44, y: 0.89 },
-    { text: "搜尋", confidence: 1, x: 0.4, y: 0.812 },
-  ];
-  const detailLines = [{ text: "CP555", confidence: 1, x: 0.5, y: 0.94 }];
-  const taps: Record<string, unknown>[] = [];
-  const phone = {
-    async call(name: string, args: Record<string, unknown>) {
-      if (name === "observe") return frame("box");
-      if (name === "tap") { taps.push(args); return { action_executed: true }; }
+  // OCR of Gungnir after NO: the menu, then the detail page, then the box.
+  const screens: Record<string, { text: string; confidence: number; x: number; y: number }[]> = {
+    dialog: ordinaryPrompt,
+    menu: [
+      confirmLine("寶可夢圖鑑", 0.708, 0.562), confirmLine("道具", 0.626, 0.691),
+      confirmLine("籤", 0.381, 0.691), confirmLine("我的最愛", 0.298, 0.603),
+      confirmLine("調查寶可夢", 0.217, 0.562), confirmLine("傳送", 0.135, 0.691),
+    ],
+    detail: [confirmLine("CP240", 0.911, 0.356), confirmLine("木棉球", 0.563, 0.397)],
+    box: [confirmLine("寶可夢", 0.905, 0.442), confirmLine("Q搜尋", 0.812, 0.432)],
+    other: [confirmLine("載入中", 0.5, 0.4)],
+  };
+  const phoneShowing = (frames: string[], taps: { x: number; y: number }[]) => ({
+    async call(name: string, args: { x: number; y: number }) {
+      if (name === "observe") return frame(frames.length > 1 ? frames.shift()! : frames[0]);
+      if (name === "tap") { taps.push({ x: args.x, y: args.y }); return { action_executed: true }; }
       throw new Error(`Unexpected phone call: ${name}`);
     },
-  } as unknown as IphoneMcp;
-  const readLines = async (id: string) => id === "box" ? boxLines : detailLines;
-  assert.equal((await returnToBoxAfterSkip(phone, frame("detail"), readLines)).observation_id, "box");
-  assert.equal(taps.length, 1);
-  assert.equal(taps[0].x, 9.5);
-  assert.equal(taps[0].y, 35.4);
-  assert.equal((await returnToBoxAfterSkip(phone, frame("box"), readLines)).observation_id, "box");
-  assert.equal(taps.length, 1);
-  const stuck = { async call(name: string, args: Record<string, unknown>) {
-    if (name === "observe") return frame("detail");
-    if (name === "tap") { taps.push(args); return { action_executed: true }; }
-    throw new Error(`Unexpected phone call: ${name}`);
-  } } as unknown as IphoneMcp;
+  }) as unknown as IphoneMcp;
+  const read = async (id: string) => screens[id];
+  const waits: number[] = [];
+  const taps: { x: number; y: number }[] = [];
+  const back = await returnToBoxAfterSkip(
+    phoneShowing(["detail", "box"], taps), frame("menu"), read,
+    async (ms) => { waits.push(ms); },
+  );
+  assert.equal(back.observation_id, "box");
+  assert.equal(taps.length, 2);
+  assert.ok(Math.abs(taps[0].x - 86.5) < 1e-9 && Math.abs(taps[0].y - 188) < 1e-9);
+  assert.ok(Math.abs(taps[1].x - 50) < 1e-9 && Math.abs(taps[1].y - 188) < 1e-9);
+  assert.deepEqual(waits, [700, 700]);
+
+  const fromDialog: { x: number; y: number }[] = [];
+  await returnToBoxAfterSkip(phoneShowing(["menu", "detail", "box"], fromDialog), frame("dialog"), read, async () => {});
+  assert.equal(fromDialog.length, 3);
+  assert.ok(fromDialog[0].y > 120 && fromDialog[0].y < 124);
+
+  const none: { x: number; y: number }[] = [];
+  assert.equal((await returnToBoxAfterSkip(phoneShowing(["box"], none), frame("box"), read, async () => {})).observation_id, "box");
   await assert.rejects(
-    () => returnToBoxAfterSkip(stuck, frame("detail"), readLines),
+    () => returnToBoxAfterSkip(phoneShowing(["other"], none), frame("other"), read, async () => {}),
     /按 X 未回到寶可夢盒子列表/,
   );
-  assert.equal(taps.length, 2);
+  assert.equal(none.length, 0);
+  const stuck: { x: number; y: number }[] = [];
+  await assert.rejects(
+    () => returnToBoxAfterSkip(phoneShowing(["detail"], stuck), frame("detail"), read, async () => {}),
+    /按 X 未回到寶可夢盒子列表/,
+  );
+  assert.equal(stuck.length, 6);
 });
 
-test("連續同圖鑑編號只保留同一搜尋結果，換物種或最後一隻返回盒子", () => {
+test("寶可夢選單只看右側的選單項目", () => {
+  assert.equal(pokemonMenuOpen(transferMenu), true);
+  assert.equal(pokemonMenuOpen([confirmLine("傳送", 0.135, 0.691)]), false);
+  assert.equal(pokemonMenuOpen([confirmLine("寶可夢", 0.905, 0.442), confirmLine("道具", 0.6, 0.2), confirmLine("傳送", 0.3, 0.2)]), false);
+  assert.equal(pokemonMenuOpen(ordinaryPrompt), false);
+});
+
+test("同圖鑑編號連續處理：依各物種首次出現排序，換物種或最後一隻才離開搜尋", () => {
   const snapshot = fixture();
   snapshot.species.weak.dex = 11;
   const analysis = { category: "transfer", currentLevels: [15] } as ReturnType<typeof record>["analysis"];
   const first = record("same-dex-first", { favorite: false }, { analysis });
+  const other = record("other-dex", { favorite: false, speciesId: "weak" }, { analysis });
   const second = record("same-dex-second", { favorite: false }, { analysis });
+  const records = [first, other, second];
   const batch = {
     mode: "bulk",
-    entries: [first, second].map((pokemon) => ({
-      pokemonId: pokemon.id, status: "pending", reason: null,
+    entries: [...records.map((pokemon) => pokemon.id), "missing"].map((pokemonId) => ({
+      pokemonId, status: "pending", reason: null,
     })),
   } as TransferBatch;
-  assert.equal(nextPendingUsesDex(batch, 0, 10, [first, second], snapshot), true);
-  assert.equal(nextPendingUsesDex(batch, 1, 10, [first, second], snapshot), false);
-  assert.equal(nextPendingUsesDex({ ...batch, mode: "single" }, 0, 10, [first, second], snapshot), false);
-  assert.equal(nextPendingUsesDex(batch, 0, 10, [first, { ...second, locked: true }], snapshot), false);
-  const different = record(second.id, { favorite: false, speciesId: "weak" }, { analysis });
-  assert.equal(nextPendingUsesDex(batch, 0, 10, [first, different], snapshot), false);
+  const order = transferOrder(batch, [0, 1, 2, 3], records, snapshot);
+  assert.deepEqual(order, [0, 2, 1, 3]);
+  assert.deepEqual(transferOrder(batch, [1, 2], records, snapshot), [1, 2]);
+  assert.equal(nextPendingUsesDex(batch, order, 0, 10, records, snapshot), true);
+  assert.equal(nextPendingUsesDex(batch, order, 2, 10, records, snapshot), false);
+  assert.equal(nextPendingUsesDex(batch, order, 3, 10, records, snapshot), false);
+  assert.equal(nextPendingUsesDex({ ...batch, mode: "single" }, order, 0, 10, records, snapshot), false);
+  assert.equal(nextPendingUsesDex(batch, order, 0, 10, [first, other, { ...second, locked: true }], snapshot), false);
+  assert.equal(nextPendingUsesDex({
+    ...batch,
+    entries: batch.entries.map((entry, index) => index === 2 ? { ...entry, status: "skipped" } : entry),
+  }, order, 0, 10, records, snapshot), false);
 });
 
 test("本機 OCR 只接受一般放生確認，額外警告不得點確認", () => {
@@ -342,7 +452,7 @@ test("本機 OCR 只接受一般放生確認，額外警告不得點確認", () 
   assert.equal(standardTransferDialog(ordinary.slice(0, 3)), false);
 });
 
-test("列表起點只用本機 OCR 確認寶可夢盒與圖鑑搜尋值", () => {
+test("列表起點只用本機 OCR 確認寶可夢盒與搜尋狀態", () => {
   const line = (text: string, x: number, y: number) => ({
     text, x, y, confidence: 1,
   });
@@ -352,38 +462,10 @@ test("列表起點只用本機 OCR 確認寶可夢盒與圖鑑搜尋值", () => 
   assert.equal(collectionSearchState([title]), null);
   const active = [title, line("Q 928", 0.18, 0.812)];
   assert.equal(collectionSearchState(active), "active");
-  assert.equal(searchQueryMatches(active, 928), true);
-  assert.equal(searchQueryMatches(active, 929), false);
-  assert.equal(searchQueryMatches([title, line("9 919", 0.18, 0.812)], 919), true);
-  assert.equal(searchQueryMatches([title, line("9 1919", 0.18, 0.812)], 919), false);
   assert.equal(backgroundQueryMatches([title, line("Q 928&背卡", 0.18, 0.812)], 928), true);
   assert.equal(backgroundQueryMatches([title, line("Q 928", 0.18, 0.812)], 928), false);
   assert.equal(backgroundQueryMatches([title, line("Q 928&background", 0.18, 0.812)], 928), false);
   assert.equal(backgroundQueryMatches([title, line("Q 929&背卡", 0.18, 0.812)], 928), false);
-  assert.equal(searchQueryMatches([title, line("Q 928&背卡", 0.18, 0.812)], 928), false);
-  assert.equal(nonBackgroundQuery(928), "928&!背卡");
-  assert.equal(nonBackgroundQueryMatches([title, line("Q 928&!背卡", 0.18, 0.812)], 928), true);
-  assert.equal(nonBackgroundQueryMatches([title, line("Q 928!背卡", 0.18, 0.812)], 928), false);
-  assert.equal(nonBackgroundQueryMatches([title, line("Q 928&背卡", 0.18, 0.812)], 928), false);
-  assert.equal(nonBackgroundQueryMatches([title, line("Q 929&!背卡", 0.18, 0.812)], 928), false);
-  assert.equal(croppedNonBackgroundQueryMatches([line("871&！背卡", 0.2, 0.5)], 870), false);
-  const negative = [line("870&！背卡", 0.2, 0.5)];
-  const missedMark = [line("870&背卡", 0.2, 0.5)];
-  assert.equal(croppedNonBackgroundConsensus([negative, missedMark, negative], 870), true);
-  assert.equal(croppedNonBackgroundConsensus([negative, missedMark, missedMark], 870), false);
-  assert.equal(croppedBackgroundTextCompatible([[line("333&.背卡", 0.2, 0.5)]], 333), true);
-  assert.equal(croppedBackgroundTextCompatible([[line("334&.背卡", 0.2, 0.5)]], 333), false);
-  assert.equal(hasExclamationRun([
-    { start: 232, end: 248, minY: 11, maxY: 30 },
-    { start: 253, end: 256, minY: 11, maxY: 30 },
-    { start: 261, end: 283, minY: 8, maxY: 32 },
-    { start: 288, end: 311, minY: 8, maxY: 32 },
-  ], 719, 1536), true);
-  assert.equal(hasExclamationRun([
-    { start: 232, end: 248, minY: 11, maxY: 30 },
-    { start: 254, end: 276, minY: 8, maxY: 32 },
-    { start: 281, end: 303, minY: 8, maxY: 32 },
-  ], 719, 1536), false);
   const background = [title, line("Q 928&背卡", 0.18, 0.812),
     line("寶可夢 (1)", 0.44, 0.905), line("CP 100", 0.2, 0.7)];
   assert.equal(backgroundSearchDecision(background, 928, 100), "protected");
@@ -1244,49 +1326,7 @@ test("CP、HP、IV 只對應唯一同圖鑑形態時修正形態", () => {
   assert.equal(uniqueFormFromStats(fields, snapshot), null);
 });
 
-test("圖鑑編號直接輸入一次，確認後才送出搜尋", async () => {
-  const typed: string[] = [];
-  const submitted: [number, boolean][] = [];
-  const phone = {} as IphoneMcp;
-  await typeNumericSearch(phone, 125, async (query) => { typed.push(query); }, async () => {}, async (_phone, dex, background) => { submitted.push([dex, background]); });
-  assert.deepEqual(typed, ["125"]);
-  assert.deepEqual(submitted, [[125, false]]);
-  await assert.rejects(() => typeNumericSearch(phone, 0, async () => {}), /圖鑑編號/);
-});
-
-test("繁中背卡查詢直接輸入；注入失敗時不送出搜尋", async () => {
-  const typed: string[] = [];
-  const submitted: [number, boolean][] = [];
-  const phone = {} as IphoneMcp;
-  await typeBackgroundSearch(phone, 656, async (query) => { typed.push(query); }, async () => {}, async (_phone, dex, background) => { submitted.push([dex, background]); });
-  assert.deepEqual(typed, ["656&背卡"]);
-  assert.deepEqual(submitted, [[656, true]]);
-  await assert.rejects(
-    () => typeBackgroundSearch(phone, 656, async () => { throw new Error("WDA 輸入不明"); }, async () => {}, async () => { submitted.push([0, false]); }),
-    /WDA 輸入不明/,
-  );
-  assert.deepEqual(submitted, [[656, true]]);
-});
-
-test("排除背卡搜尋只輸入一次，並以完整查詢核對後才送出", async () => {
-  const typed: string[] = [];
-  const submitted: [number, boolean | "exclude-background"][] = [];
-  const phone = {} as IphoneMcp;
-  await typeNonBackgroundSearch(phone, 656,
-    async (query) => { typed.push(query); }, async () => {},
-    async (_phone, dex, mode) => { submitted.push([dex, mode]); });
-  assert.deepEqual(typed, ["656&!背卡"]);
-  assert.deepEqual(submitted, [[656, "exclude-background"]]);
-  await assert.rejects(
-    () => typeNonBackgroundSearch(phone, 656,
-      async () => { throw new Error("輸入失敗"); }, async () => {},
-      async () => { submitted.push([0, false]); }),
-    /輸入失敗/,
-  );
-  assert.deepEqual(submitted, [[656, "exclude-background"]]);
-});
-
-test("放生搜尋勾選條件使用繁中白名單、固定順序與完整字串核對", async () => {
+test("放生搜尋勾選條件使用繁中白名單與固定順序，輸入後直接送出", async () => {
   const line = (text: string) => ({ text, x: 0.18, y: 0.812, confidence: 1 });
   const selected = ["shiny", "background", "lucky"] as const;
   assert.equal(transferSearchQuery(25, selected), "25&!背卡&!亮晶晶&!異色");
@@ -1303,39 +1343,30 @@ test("放生搜尋勾選條件使用繁中白名單、固定順序與完整字�
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!未知"), false);
   assert.throws(() => transferSearchQuery(25, ["background", "lucky", "shiny", "costume", "shadow"]), /最多四項/);
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!亮晶晶&!異色&!特殊&!暗影"), false);
-  assert.equal(transferQueryMatches([line("Q 25&!背卡&!亮晶晶&!異色")], 25, selected), true);
-  const selectedFour = ["shiny", "costume", "background", "lucky"] as const;
-  assert.equal(transferQueryMatches([line("Q 25&！背卡&！亮晶晶&！異色&！特殊")], 25, selectedFour), true);
-  assert.equal(transferQueryMatches([line("Q 25&！背卡&！亮晶晶&！異色")], 25, selectedFour), false);
-  assert.equal(transferQueryMatches([line("Q 25&!背卡&!亮晶晶")], 25, selected), false);
-  assert.equal(transferQueryMatches([line("Q 26&!背卡&!亮晶晶&!異色")], 25, selected), false);
-  assert.equal(croppedTransferQueryConsensus([
-    [line("25&!背卡&!亮晶晶&!異色")],
-    [line("25&!背卡&!亮晶晶")],
-    [line("25&!背卡&!亮晶晶&!異色")],
-  ], 25, selected), true);
-  assert.equal(croppedTransferQueryConsensus([
-    [line("Q25&！背卡&！亮晶晶&！異色")],
-    [line("Q25&！背卡&！亮晶晶&！異色")],
-    [line("Q25&！背卡&！亮晶晶")],
-  ], 25, selected), true);
-  assert.equal(croppedTransferQueryConsensus([
-    [line("25&!背卡&!亮晶晶")],
-    [line("25&!背卡&!亮晶晶")],
-    [line("25&!背卡&!亮晶晶&!異色")],
-  ], 25, selected), false);
-  assert.equal(croppedTransferQueryConsensus([
-    [line("Q26&！背卡&！亮晶晶&！異色")],
-    [line("Q26&！背卡&！亮晶晶&！異色")],
-    [line("Q25&！背卡&！亮晶晶&！異色")],
-  ], 25, selected), false);
-  const typed: string[] = [];
-  const submitted: string[] = [];
+  const events: string[] = [];
   await typeFilteredSearch({} as IphoneMcp, 25, selected,
-    async (query) => { typed.push(query); }, async () => {},
-    async (_phone, dex, filters) => { submitted.push(transferSearchQuery(dex, filters)); });
-  assert.deepEqual(typed, ["25&!背卡&!亮晶晶&!異色"]);
-  assert.deepEqual(submitted, typed);
+    async (query) => { events.push(`type ${query}`); },
+    async () => { events.push("screen"); return { observation_id: "search" } as never; },
+    async (_phone, screen) => { events.push(`submit ${screen.observation_id}`); });
+  assert.deepEqual(events, ["screen", "type 25&!背卡&!亮晶晶&!異色", "submit search"]);
+});
+
+test("貼上提示蓋住搜尋結果數量時，短暫等待後重新讀取", async () => {
+  const frame = (id: string) => ({
+    app: "com.nianticlabs.pokemongo",
+    observation_id: id,
+    image: { path: `/tmp/${id}.png`, width: 100, height: 200, pixel_to_point: [1, 1] },
+  });
+  const frames = [frame("banner"), frame("clear")];
+  const phone = { async call() { return frames.shift(); } } as unknown as IphoneMcp;
+  const waits: number[] = [];
+  const found = await observeSearchResults(phone, async (ms) => { waits.push(ms); },
+    async (file) => file.includes("clear")
+      ? [{ text: "寶可夢（18）", confidence: 0.9, x: 0.45, y: 0.87 }]
+      : [{ text: "Pokémon GO – 從 dtpasteboardd 貼上", confidence: 0.9, x: 0.5, y: 0.9 }]);
+  assert.equal(found.result.observation_id, "clear");
+  assert.equal(searchResultCount(found.lines), 18);
+  assert.deepEqual(waits, [500]);
 });
 
 test("已知最愛可列入確認批次，未知最愛及其他特殊狀態仍排除", () => {

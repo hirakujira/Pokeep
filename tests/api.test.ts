@@ -404,15 +404,10 @@ test("暫停批次按繼續只重試搜尋前失敗與未開始個體，拒絕�
     entries: [batch.entries[0], { ...batch.entries[1], status: "uncertain" }, batch.entries[2]],
   });
   assert.equal((await request(`transfers/${batch.id}/resume`, "POST")).status, 400);
-  const dialogError = "不是一般放生確認畫面，或出現額外警告；尚未放生";
   const single: TransferBatch = {
     ...batch,
     mode: "single",
-    entries: [batch.entries[0], {
-      ...batch.entries[1], reason: dialogError,
-      preparedAt: stamp, evidence: "search-cp.jpg",
-    }],
-    error: dialogError,
+    entries: batch.entries.slice(0, 2),
   };
   single.signature = transferSignature(single, store.listPokemon(), snapshot, store.getSettings());
   store.put("transfer_batches", batch.id, single);
@@ -421,8 +416,15 @@ test("暫停批次按繼續只重試搜尋前失敗與未開始個體，拒絕�
   const retriedBatch = await retried.json() as TransferBatch;
   assert.equal(retriedBatch.selectedPokemonId, retry.id);
   assert.equal(retriedBatch.entries[1].status, "pending");
-  assert.equal(retriedBatch.entries[1].preparedAt, undefined);
   store.put("transfer_batches", batch.id, { ...single, signature: "stale" });
+  assert.equal((await request(`transfers/${batch.id}/resume`, "POST")).status, 400);
+  // A failure after the candidate was opened is skipped, never retried.
+  const opened: TransferBatch = {
+    ...single,
+    entries: [batch.entries[0], { ...batch.entries[1], preparedAt: stamp, evidence: "search-cp.jpg" }],
+  };
+  opened.signature = transferSignature(opened, store.listPokemon(), snapshot, store.getSettings());
+  store.put("transfer_batches", batch.id, opened);
   assert.equal((await request(`transfers/${batch.id}/resume`, "POST")).status, 400);
   for (const pokemon of [done, retry, untouched]) store.remove("pokemon", pokemon.id);
   store.remove("transfer_batches", batch.id);

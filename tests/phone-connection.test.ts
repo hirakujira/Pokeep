@@ -143,7 +143,7 @@ test("放生搜尋預設透過手機連線輸入文字", async () => {
       typed.push(query);
     },
   } as unknown as PhoneConnection;
-  await typeFilteredSearch(phone, 25, ["background"], undefined, async () => {}, async () => {});
+  await typeFilteredSearch(phone, 25, ["background"], undefined, async () => ({}) as never, async () => {});
   assert.deepEqual(typed, ["25&!背卡"]);
 });
 
