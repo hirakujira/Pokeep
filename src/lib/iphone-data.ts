@@ -203,14 +203,17 @@ export function previewBatch(scanId: string) {
   return batch;
 }
 export function assertBatchFresh(batch: TransferBatch) {
+  const records = listPokemon();
+  const snapshot = getSnapshot();
   if (
     batch.signature !==
-    transferSignature(batch, listPokemon(), getSnapshot(), getSettings())
+    transferSignature(batch, records, snapshot, getSettings())
   )
     throw new Error("收藏資料、分析或設定已改變；請重新預覽放生名單");
+  const byId = new Map(records.map((row) => [row.id, row]));
   for (const entry of batch.entries.filter((row) => row.status === "pending")) {
-    const p = listPokemon().find((row) => row.id === entry.pokemonId);
-    if (!p || transferExclusion(p, getSnapshot()))
+    const p = byId.get(entry.pokemonId);
+    if (!p || transferExclusion(p, snapshot))
       throw new Error("放生名單包含已不符合條件的個體，請重新預覽");
   }
 }

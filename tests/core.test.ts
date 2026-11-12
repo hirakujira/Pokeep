@@ -931,6 +931,34 @@ test("IV 排名遍歷 4096 組：CP 遠低於上限的滿 IV 排名第一", () =
   assert.ok(low.rank > 4000);
   assert.ok(low.cp <= 1500);
 });
+test("IV 排名表與逐組比較的結果一致，含 CP 上限造成的同分", () => {
+  const s = fixture();
+  const strong = { ...species("strong"), atk: 190, def: 160, sta: 170 };
+  const level = (l: number) => {
+    const low = Math.floor(l);
+    const c = s.cpm[low - 1];
+    return l === low ? c : Math.sqrt((c * c + s.cpm[low] ** 2) / 2);
+  };
+  const reference = (iv: number[], cap: number) => {
+    let best = 0;
+    for (let l = 1; l <= 50; l += 0.5)
+      if (combatPower(strong, iv, l, s) <= cap) best = l;
+    if (!best) return 0;
+    const c = level(best);
+    return (strong.atk + iv[0]) * c * (strong.def + iv[1]) * c * hitPoints(strong, iv[2], best, s);
+  };
+  for (const cap of [1500, 2500]) {
+    const all: number[] = [];
+    for (let a = 0; a < 16; a++)
+      for (let d = 0; d < 16; d++)
+        for (let h = 0; h < 16; h++) all.push(reference([a, d, h], cap));
+    for (let i = 0; i < 4096; i += 37) {
+      const iv = [i >> 8, (i >> 4) & 15, i & 15];
+      const expected = 1 + all.filter((score) => score > all[i] + 1e-7).length;
+      assert.equal(rankIV(strong, iv, cap, s).rank, expected, `${cap} ${iv.join("/")}`);
+    }
+  }
+});
 test("進化分支遵守性別限制，服裝不能推斷可進化", () => {
   const s = fixture();
   s.species.caterpie.evolutions = [

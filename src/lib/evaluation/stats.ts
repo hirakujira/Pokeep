@@ -93,31 +93,60 @@ function product(s: Species, iv: number[], level: number, snapshot: Snapshot) {
     hitPoints(s, iv[2], level, snapshot)
   );
 }
-const ivCache = new Map<string, number[]>();
+// Rank tables depend only on species, league cap and game data. One collection
+// needs thousands, more than an evicting cache keeps through a full evaluation,
+// so they live as long as the snapshot.
+let rankVersion = "";
+const rankTables = new Map<string, Uint16Array>();
+function ivScores(s: Species, cap: number, snapshot: Snapshot) {
+  const scores = new Float64Array(4096);
+  for (let a = 0; a < 16; a++)
+    for (let d = 0; d < 16; d++)
+      for (let h = 0; h < 16; h++) {
+        const v = [a, d, h],
+          l = bestLevel(s, v, cap, snapshot);
+        scores[a * 256 + d * 16 + h] = l ? product(s, v, l, snapshot) : 0;
+      }
+  return scores;
+}
+function rankAmong(descending: Float64Array, score: number) {
+  let lo = 0,
+    hi = descending.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (descending[mid] > score + 1e-7) lo = mid + 1;
+    else hi = mid;
+  }
+  return 1 + lo;
+}
+function rankTable(s: Species, cap: number, snapshot: Snapshot) {
+  if (rankVersion !== snapshot.version) {
+    rankTables.clear();
+    rankVersion = snapshot.version;
+  }
+  const key = `${s.id}/${cap}`;
+  let ranks = rankTables.get(key);
+  if (!ranks) {
+    const scores = ivScores(s, cap, snapshot);
+    const descending = Float64Array.from(scores).sort().reverse();
+    ranks = new Uint16Array(4096);
+    for (let i = 0; i < 4096; i++) ranks[i] = rankAmong(descending, scores[i]);
+    rankTables.set(key, ranks);
+  }
+  return ranks;
+}
 export function rankIV(
   s: Species,
   iv: number[],
   cap: number,
   snapshot: Snapshot,
 ) {
-  const key = `${snapshot.version}/${s.id}/${cap}`;
-  let scores = ivCache.get(key);
-  if (!scores) {
-    scores = [];
-    for (let a = 0; a < 16; a++)
-      for (let d = 0; d < 16; d++)
-        for (let h = 0; h < 16; h++) {
-          const v = [a, d, h],
-            l = bestLevel(s, v, cap, snapshot);
-          scores.push(l ? product(s, v, l, snapshot) : 0);
-        }
-    scores.sort((a, b) => b - a);
-    ivCache.set(key, scores);
-    if (ivCache.size > 500) ivCache.delete(ivCache.keys().next().value!);
-  }
   const level = bestLevel(s, iv, cap, snapshot),
     score = level ? product(s, iv, level, snapshot) : 0;
-  const rank = 1 + scores.filter((v) => v > score + 1e-7).length;
+  const rank =
+    iv.length === 3 && iv.every((v) => Number.isInteger(v) && v >= 0 && v <= 15)
+      ? rankTable(s, cap, snapshot)[iv[0] * 256 + iv[1] * 16 + iv[2]]
+      : rankAmong(ivScores(s, cap, snapshot).sort().reverse(), score);
   return {
     rank,
     level,
