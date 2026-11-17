@@ -19,9 +19,12 @@ export const defaultTransferSearchFilters: TransferSearchFilter[] = ["background
 
 export function transferSearchQuery(
   dex: number, selectedFilters: readonly TransferSearchFilter[] = defaultTransferSearchFilters,
+  cp?: number,
 ) {
   if (!Number.isInteger(dex) || dex < 1 || dex > 10000)
     throw new Error("沒有可靠的圖鑑編號，無法搜尋候選");
+  if (cp !== undefined && (!Number.isInteger(cp) || cp < 10 || cp > 15000))
+    throw new Error("沒有可靠的 CP，無法搜尋候選");
   if (selectedFilters.length > maxTransferSearchFilters ||
       new Set(selectedFilters).size !== selectedFilters.length)
     throw new Error("搜尋排除條件最多四項且不能重複");
@@ -29,22 +32,24 @@ export function transferSearchQuery(
   const selected = transferSearchFilters.filter((filter) => requested.has(filter.id));
   if (selected.length !== selectedFilters.length)
     throw new Error("不支援的放生搜尋條件");
-  return `${dex}${selected.map((filter) => `&!${filter.term}`).join("")}`;
+  return `${dex}${cp === undefined ? "" : `&cp${cp}`}${selected.map((filter) => `&!${filter.term}`).join("")}`;
 }
 
 /** No arbitrary text reaches WDA's keyboard endpoint. */
 export function allowedPhoneSearchQuery(query: string) {
-  const match = query.match(/^([1-9]\d{0,4})(.*)$/);
+  const match = query.match(/^([1-9]\d{0,4})(?:&cp([1-9]\d{1,4}))?(.*)$/);
   if (!match || Number(match[1]) > 10000) return false;
-  const suffix = match[2];
-  if (suffix === "" || suffix === "&背卡") return true;
+  const cp = match[2] === undefined ? undefined : Number(match[2]);
+  const suffix = match[3];
+  if (cp === undefined && (suffix === "" || suffix === "&背卡")) return true;
+  if (suffix === "") return query === transferSearchQuery(Number(match[1]), [], cp);
   const parts = suffix.split("&!");
   if (parts[0] !== "" || parts.length < 2) return false;
   const selected = parts.slice(1)
     .map((term) => transferSearchFilters.find((filter) => filter.term === term)?.id);
   if (selected.some((id) => !id)) return false;
   try {
-    return query === transferSearchQuery(Number(match[1]), selected as TransferSearchFilter[]);
+    return query === transferSearchQuery(Number(match[1]), selected as TransferSearchFilter[], cp);
   } catch {
     return false;
   }

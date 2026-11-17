@@ -109,6 +109,8 @@ export const pokemonSchema = z.object({
   evolutionSilhouette: evolutionSilhouetteSchema,
   maxStatus: maxStatusSchema,
   locked: z.boolean(),
+  /** The user lifted the automatic keep for costumes; the costume group representatives still apply. */
+  costumeKeepLifted: z.boolean().optional(),
   owned: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -311,6 +313,9 @@ export const categoryLabels = {
   evolve: "可進化",
   review: "待確認",
 };
+/** iPhone transfers never touch costumes, so a lifted costume keep is released by hand in the game. */
+export const autoTransferable = (p: Pokemon) =>
+  p.owned && p.analysis?.category === "transfer" && effective(p).costume === null;
 export const effective = (p: Pokemon): Fields => {
   const f = { ...p.fields, ...p.overrides };
   // A costume-only species ID already says which costume the Pokémon wears.

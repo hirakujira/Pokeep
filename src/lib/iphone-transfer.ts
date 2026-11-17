@@ -246,7 +246,7 @@ function setEntry(
   return next;
 }
 
-async function locateCp(
+export async function locateCp(
   phone: PhoneConnection,
   first: Screen,
   firstLines: OcrLine[],
@@ -254,12 +254,15 @@ async function locateCp(
   cp: number,
   batchId: string,
   index: number,
+  cpQuery: string | null,
 ) {
   let result = first;
   let lines = firstLines;
   const count = searchResultCount(lines);
   if (count === null)
     throw new Error("無法讀取圖鑑編號的搜尋結果數量");
+  if (cpQuery && count !== 1)
+    throw new SkippedCandidate(`搜尋 ${cpQuery} 有 ${count} 隻，不是唯一一隻，已跳過且未放生`);
   if (count === 0)
     throw new SkippedCandidate("目前搜尋排除條件下沒有此物種，已跳過且未放生", dex);
   let previous = "";
@@ -313,6 +316,7 @@ async function findCandidateByDexCp(
   index: number,
   reuseSearch: boolean,
   extras: readonly TransferSearchFilter[],
+  cpSearch: boolean,
 ) {
   if (!current.image?.path) throw new Error("寶可夢盒子沒有可讀截圖");
   let result = current;
@@ -329,15 +333,16 @@ async function findCandidateByDexCp(
         throw new Error("無法離開目前的搜尋，尚未放生");
     }
     await tapFast(phone, result, transferPoint.search);
-    await typeFilteredSearch(phone, dex, extras);
+    await typeFilteredSearch(phone, dex, extras, cpSearch ? cp : undefined);
     ({ result, lines } = await observeSearchResults(phone));
   };
-  let reused = reuseSearch && searchState === "active" &&
+  let reused = reuseSearch && !cpSearch && searchState === "active" &&
     searchResultCount(lines) !== null;
   if (!reused) await search();
   for (;;) {
     try {
-      return await locateCp(phone, result, lines, dex, cp, batchId, index);
+      return await locateCp(phone, result, lines, dex, cp, batchId, index,
+        cpSearch ? transferSearchQuery(dex, extras, cp) : null);
     } catch (error) {
       if (!reused || !(error instanceof SkippedCandidate)) throw error;
       // The kept results may be scrolled past the target; search from the top.
@@ -351,13 +356,14 @@ export async function typeFilteredSearch(
   phone: PhoneConnection,
   dex: number,
   extras: readonly TransferSearchFilter[],
+  cp: number | undefined,
   inject: (query: string) => Promise<void> = (query) => phone.typeSearch(query),
   waitForScreen: (phone: PhoneConnection) => Promise<Screen> =
     waitForSearchScreen,
   submit: (phone: PhoneConnection, screen: Screen) => Promise<void> =
     submitSearch,
 ) {
-  const query = transferSearchQuery(dex, extras);
+  const query = transferSearchQuery(dex, extras, cp);
   const screen = await waitForScreen(phone);
   await inject(query);
   await submit(phone, screen);
@@ -489,10 +495,13 @@ export async function runTransferBatch(
           throw new SkippedCandidate("同圖鑑編號與 CP 不唯一，已跳過且未放生");
         throw error;
       }
+      const extras = batch.searchExclusions || defaultTransferSearchFilters;
       batch = setEntry(batch.id, index, {
         status: "searching",
-        reason: `正在搜尋 ${transferSearchQuery(identity.dex, batch.searchExclusions || defaultTransferSearchFilters)} 的唯一 CP`,
+        reason: `正在搜尋 ${transferSearchQuery(identity.dex, extras, identity.cpSearch ? identity.cp : undefined)} 的唯一 CP`,
       });
+      // A dex&cp search replaces whatever dex results the screen showed.
+      if (identity.cpSearch) shownDex = null;
       let found: Awaited<ReturnType<typeof findCandidateByDexCp>>;
       for (let attempt = 0; ; attempt++) {
         const screen = await observeGameForeground(phone, current);
@@ -502,7 +511,8 @@ export async function runTransferBatch(
           found = await findCandidateByDexCp(
             phone, current, currentLines, identity.dex, identity.cp, batch.id, index,
             attempt === 0 && shownDex === identity.dex,
-            batch.searchExclusions || defaultTransferSearchFilters,
+            extras,
+            identity.cpSearch,
           );
           await tapFast(phone, found.observation, found.point);
           break;
@@ -518,7 +528,7 @@ export async function runTransferBatch(
         }
       }
       currentLines = null;
-      shownDex = identity.dex;
+      shownDex = identity.cpSearch ? null : identity.dex;
       batch = setEntry(batch.id, index, {
         status: "prepared",
         preparedAt: now(),

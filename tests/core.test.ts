@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { fixture, record, species, settings } from "./fixtures";
-import { effective, emptyFields, settingsSchema, validFrame, type Fields, type Observation, type Pokemon } from "../src/lib/types";
+import { autoTransferable, effective, emptyFields, settingsSchema, validFrame, type Fields, type Observation, type Pokemon } from "../src/lib/types";
 import { canonicalCostume, costumeVocabulary, knownCostumes } from "../src/lib/costumes";
 import type { ScanItem } from "../src/lib/iphone-types";
 
@@ -483,6 +483,21 @@ test("掃描到「普通」等一般形態寫法時歸入同一收藏組", () =>
   ).length, 1);
 });
 
+test("解除特殊造型保留後只留同服裝收藏代表，其餘列為需手動放生", () => {
+  const snapshot = fixture();
+  const hats = [0, 1, 2].map((index) => record(`hat-${index}`, { costume: "派對帽", favorite: false },
+    { costumeKeepLifted: true, evolutionSilhouette: "unavailable", maxStatus: "none" }));
+  const evaluated = evaluateCollection(hats, snapshot, { ...settings, rareRepresentatives: 1 });
+  assert.deepEqual(evaluated.map((p) => p.analysis?.category).sort(), ["collect", "transfer", "transfer"]);
+  for (const p of evaluated.filter((p) => p.analysis?.category === "transfer")) {
+    assert.match(p.analysis?.reasons[0] || "", /已解除特殊造型保留/);
+    assert.equal(autoTransferable(p), false);
+    assert.ok(transferExclusion(p, snapshot));
+  }
+  const kept = evaluateCollection(hats.map((p) => ({ ...p, costumeKeepLifted: false })), snapshot,
+    { ...settings, rareRepresentatives: 1 });
+  assert.deepEqual(kept.map((p) => p.analysis?.category), ["collect", "collect", "collect"]);
+});
 test("未登錄進化剪影與已匯入收藏缺少下一階即列為可進化", () => {
   const snapshot = fixture();
   snapshot.species.caterpie.evolutions = [
@@ -515,6 +530,11 @@ test("未登錄進化剪影與已匯入收藏缺少下一階即列為可進化",
     snapshot, settings, new Set(["costumed"]),
   )[0];
   assert.equal(costumed.analysis?.category, "collect");
+  const costumedSilhouette = evaluateCollection(
+    [record("costumed-silhouette", { costume: "特殊造型" }, { evolutionSilhouette: true })],
+    snapshot, settings, new Set(["costumed-silhouette"]),
+  )[0];
+  assert.equal(costumedSilhouette.analysis?.category, "collect");
   snapshot.species.eevee = species("eevee", {
     evolutions: [
       { id: "vaporeon", candy: 25, condition: null },

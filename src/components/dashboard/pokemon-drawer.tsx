@@ -658,6 +658,15 @@ export function PokemonDrawer({
               <LockKeyhole size={14} />
               {p.locked ? "已鎖定保留" : "鎖定保留"}
             </button>
+            {effective(p).costume !== null && !p.locked && (
+              <button
+                className="button small secondary"
+                disabled={busy}
+                onClick={() => void onSave({ costumeKeepLifted: !p.costumeKeepLifted })}
+              >
+                {p.costumeKeepLifted ? "恢復特殊造型保留" : "解除特殊造型保留"}
+              </button>
+            )}
             <button
               className="text-button"
               disabled={busy}

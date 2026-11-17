@@ -19,6 +19,7 @@ import {
   skipCurrentTransferEntry,
   scanItems,
   scans,
+  transferableScan,
 } from "@/lib/iphone-data";
 import type { TransferBatch } from "@/lib/iphone-types";
 import { transferSignature } from "@/lib/iphone-safety";
@@ -84,11 +85,11 @@ function approveFromCompletedScan(pokemonId: string) {
       throw new Error("手機正在處理其他工作");
     const scan = scans().find(
       (row) =>
-        row.status === "completed" &&
-        scanItems(row.id).some((item) => item.pokemonId === pokemonId),
+        transferableScan(row) &&
+        scanItems(row.id).some((item) => item.pokemonId === pokemonId && item.fields),
     );
     if (!scan)
-      throw new Error("找不到包含這隻寶可夢的已完成掃描");
+      throw new Error("找不到包含這隻寶可夢且已解析的掃描");
     const batch = previewBatch(scan.id);
     if (
       !batch.entries.some(
@@ -113,13 +114,14 @@ function approveSelection(pokemonIds: string[], searchExclusions: SearchExclusio
     if (activeScan() || activeBatch())
       throw new Error("手機正在處理其他工作");
     const wanted = new Set(pokemonIds);
-    // Newest completed scan per Pokémon, so a full box scan and later latest-catch scans can share one batch.
+    // Newest usable scan per Pokémon, so a full box scan and later latest-catch or stopped scans can share one batch.
     const scanOf = new Map<string, string>();
-    for (const row of scans().filter((scan) => scan.status === "completed"))
+    for (const row of scans().filter(transferableScan))
       for (const item of scanItems(row.id))
-        if (item.pokemonId && !scanOf.has(item.pokemonId)) scanOf.set(item.pokemonId, row.id);
+        if (item.pokemonId && item.fields && !scanOf.has(item.pokemonId))
+          scanOf.set(item.pokemonId, row.id);
     if (pokemonIds.some((id) => !scanOf.has(id)))
-      throw new Error("找不到包含全部勾選個體的已完成掃描");
+      throw new Error("找不到包含全部勾選個體且已解析的掃描");
     const [first, ...rest] = [...new Set(pokemonIds.map((id) => scanOf.get(id)!))];
     const preview = previewBatch(first, ...rest);
     const entries = preview.entries.filter((entry) => wanted.has(entry.pokemonId));

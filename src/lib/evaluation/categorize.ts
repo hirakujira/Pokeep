@@ -177,7 +177,8 @@ function assignCategory(
   } else if (d.evolution.needsReview.has(p.id)) {
     a.category = "review";
     a.reasons.unshift("有未登錄進化剪影，但多分支與收藏狀態無法唯一對應；請人工核對");
-  } else if (p.evolutionSilhouette === true && !d.evolution.peers.has(p.id)) {
+  } else if (p.evolutionSilhouette === true && f.costume === null && !d.evolution.peers.has(p.id)) {
+    // Costumes skip evolution inference and are never transfer candidates, so they fall through to collect.
     a.category = "review";
     a.reasons.unshift("進化按鈕顯示未登錄剪影，但已匯入收藏中有下一階進化型，或進化目標無法確認；核對前不列入可放生");
   } else if (unresolvedMissingEvolution(p, d.living, snapshot)) {
@@ -197,9 +198,13 @@ function assignCategory(
     a.category = "review";
     a.reasons.unshift("極巨化狀態未能從能力頁確認，放生前請核對");
   }
-  else if (f.costume !== null) {
+  else if (f.costume !== null && !p.costumeKeepLifted) {
     a.category = "collect";
     a.reasons.unshift("特殊造型保留，不列入自動放生候選");
+  }
+  else if (f.costume !== null) {
+    a.category = "transfer";
+    a.reasons.unshift("已解除特殊造型保留且未入選收藏代表；iPhone 不會自動放生有服裝的個體，請在遊戲中手動放生後按「標記已放生」");
   }
   else {
     a.category = "transfer";

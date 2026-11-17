@@ -969,3 +969,56 @@ test("詢問 AI 只帶仍持有的紀錄給已設定的 AI，並回傳回答", a
     server.close();
   }
 });
+
+test("詳細資料可解除與恢復特殊造型保留", async () => {
+  store.saveSnapshot(fixture());
+  store.put("pokemon", "costume-lift", record("costume-lift", { costume: "派對帽" }));
+  try {
+    const lifted = await request("pokemon/costume-lift", "PATCH", { costumeKeepLifted: true });
+    assert.equal(lifted.status, 200);
+    assert.equal((await lifted.json()).costumeKeepLifted, true);
+    const restored = await request("pokemon/costume-lift", "PATCH", { costumeKeepLifted: false });
+    assert.equal((await restored.json()).costumeKeepLifted, false);
+  } finally {
+    store.remove("pokemon", "costume-lift");
+  }
+});
+
+test("已停止的掃描可放生已解析的個體，未解析與暫停中的掃描不採用", async () => {
+  store.saveSnapshot(fixture());
+  const analysis = { category: "transfer", currentLevels: [15] } as Pokemon["analysis"];
+  const parsed = record("stopped-parsed", { cp: 179, favorite: false }, { analysis });
+  const paused = record("paused-parsed", { cp: 180, favorite: false }, { analysis });
+  const scan = (id: string, status: string) => ({
+    id, scope: "results", status, phase: "capture", stage: "已停止",
+    createdAt: "2099-02-01T00:00:00.000Z", updatedAt: "2099-02-01T00:00:00.000Z",
+    scanned: 2, analyzed: 1, review: 0, expected: 5, sort: null, currentFrame: null,
+    lastFingerprint: null, apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    error: null, checkpointRequired: false, iphoneUseVersion: "test",
+  });
+  const item = (id: string, scanId: string, position: number, pokemon: Pokemon | null) => ({
+    id, scanId, position, pokemonId: pokemon?.id ?? null, fields: pokemon?.fields ?? null,
+    issues: [], protectionClear: Boolean(pokemon), frame: "", appraisalFrame: null,
+    fingerprint: "", capturedAt: new Date().toISOString(),
+  });
+  store.put("pokemon", parsed.id, parsed);
+  store.put("pokemon", paused.id, paused);
+  store.put("scans", "stopped-scan", scan("stopped-scan", "stopped"));
+  store.put("scans", "paused-scan", scan("paused-scan", "paused"));
+  store.put("scan_items", "stopped-item-0", item("stopped-item-0", "stopped-scan", 0, parsed));
+  store.put("scan_items", "stopped-item-1", item("stopped-item-1", "stopped-scan", 1, null));
+  store.put("scan_items", "paused-item-0", item("paused-item-0", "paused-scan", 0, paused));
+  try {
+    assert.equal((await request("transfers/execute-many", "POST", { pokemonIds: [paused.id] })).status, 400);
+    const response = await request("transfers/execute-many", "POST", { pokemonIds: [parsed.id] });
+    assert.equal(response.status, 200);
+    const batch = (await response.json()) as TransferBatch;
+    assert.deepEqual(batch.entries.map((entry) => entry.pokemonId), [parsed.id]);
+    store.remove("transfer_batches", batch.id);
+  } finally {
+    for (const id of ["stopped-item-0", "stopped-item-1", "paused-item-0"]) store.remove("scan_items", id);
+    for (const id of ["stopped-scan", "paused-scan"]) store.remove("scans", id);
+    store.remove("pokemon", parsed.id);
+    store.remove("pokemon", paused.id);
+  }
+});

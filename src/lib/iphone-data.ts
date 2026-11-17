@@ -153,13 +153,18 @@ export function updateScan(idValue: string, patch: Partial<Scan>) {
   put("scans", idValue, result);
   return result;
 }
+/** A stopped scan cannot be resumed; its parsed items carry the same per-Pokémon evidence as a completed one. */
+export const transferableScan = (scan: Scan) =>
+  scan.status === "completed" || scan.status === "stopped";
 export function previewBatch(scanId: string, ...moreScanIds: string[]) {
   if (activeScan() || activeBatch()) throw new Error("已有手機工作在執行");
   const items = [scanId, ...moreScanIds].flatMap((idValue) => {
     const scan = get<Scan>("scans", idValue);
-    if (!scan || scan.status !== "completed")
-      throw new Error("掃描必須完整完成才能建立放生批次");
+    if (!scan || !transferableScan(scan))
+      throw new Error("掃描必須完成或已停止才能建立放生批次");
     const rows = scanItems(idValue);
+    if (scan.status === "stopped")
+      return rows.filter((item) => item.pokemonId && item.fields);
     if (
       rows.length !== scan.scanned ||
       rows.some((item) => !item.pokemonId || !item.fields)

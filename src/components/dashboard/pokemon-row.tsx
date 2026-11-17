@@ -1,5 +1,5 @@
 import { CheckCircle2, ChevronRight, CircleHelp, Sparkles, Star } from "lucide-react";
-import { effective, type Pokemon } from "@/lib/types";
+import { autoTransferable, effective, type Pokemon } from "@/lib/types";
 import { localizeMoveText } from "@/lib/move-names";
 import { localizeSpeciesName } from "@/lib/species-names";
 import { displayPokemonName, evolutionCandySummary, speciesLabel } from "./format";
@@ -57,7 +57,7 @@ export function PokemonRow({
       }}
     >
       <td className="transfer-check-cell">
-        {p.owned && p.analysis?.category === "transfer" && (
+        {autoTransferable(p) && (
           <input
             type="checkbox"
             aria-label={`勾選 ${name} CP ${f.cp ?? "未知"}`}

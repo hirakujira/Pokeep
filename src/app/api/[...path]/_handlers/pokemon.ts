@@ -25,6 +25,7 @@ const editInput = z
     fields: fieldsSchema.partial().optional(),
     verified: z.boolean().optional(),
     locked: z.boolean().optional(),
+    costumeKeepLifted: z.boolean().optional(),
     owned: z.boolean().optional(),
     evolutionSilhouette: evolutionSilhouetteSchema.optional(),
     maxStatus: maxStatusSchema.optional(),
@@ -66,6 +67,7 @@ function applyEdit(record: Pokemon, input: z.infer<typeof editInput>) {
           ? null
           : record.verification,
     locked: input.locked ?? record.locked,
+    costumeKeepLifted: input.costumeKeepLifted ?? record.costumeKeepLifted,
     owned: input.owned ?? record.owned,
     evolutionSilhouette:
       input.evolutionSilhouette === undefined
@@ -129,6 +131,8 @@ function mergePokemon(target: string, source: string) {
     issues: [...new Set(issues)],
     sources: [...a.sources, ...b.sources],
     locked: a.locked || b.locked,
+    // Lifting removes a protection, so a merged record keeps it lifted only when both were.
+    costumeKeepLifted: Boolean(a.costumeKeepLifted && b.costumeKeepLifted),
     verified: false,
     verification: null,
     candidates: [...new Set([...a.candidates, ...b.candidates])].filter(

@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { ArrowDownToLine, FolderHeart, RefreshCw, Search, Smartphone } from "lucide-react";
-import { categoryLabels, effective, type Pokemon } from "@/lib/types";
+import { autoTransferable, categoryLabels, effective, type Pokemon } from "@/lib/types";
 import type { TransferBatch } from "@/lib/iphone-types";
 import {
   maxTransferSearchFilters,
@@ -82,7 +82,7 @@ export function ResultsPanel({
           : b.createdAt.localeCompare(a.createdAt),
     );
   const visibleTransferIds = list
-    .filter((p) => p.owned && p.analysis?.category === "transfer")
+    .filter(autoTransferable)
     .map((p) => p.id);
   const pokemonById = new Map(records.map((p) => [p.id, p]));
   const retainedEvolutionBySpecies = new Map(
@@ -100,7 +100,7 @@ export function ResultsPanel({
       .map((p) => [effective(p).speciesId!, p]),
   );
   const activeCheckedTransfers = checkedTransfers.filter((id) =>
-    records.some((p) => p.id === id && p.owned && p.analysis?.category === "transfer"),
+    records.some((p) => p.id === id && autoTransferable(p)),
   );
   const allVisibleChecked = visibleTransferIds.length > 0 &&
     visibleTransferIds.every((id) => activeCheckedTransfers.includes(id));

@@ -18,7 +18,7 @@ const { uniqueFormFromStats, displayForm } = await import("../src/lib/iphone-for
 const { exportBackup, importBackup } = await import("../src/lib/backup");
 const { recoverInterruptedPhoneWork } =
   await import("../src/lib/iphone-recovery");
-const { typeFilteredSearch, observeSearchResults, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, transferOrder, observeGameForeground, leaveSearch, settleAfterConfirm, returnToBoxAfterSkip } =
+const { typeFilteredSearch, locateCp, observeSearchResults, authorizedTransferIndex, authorizedTransferIndexes, nextPendingUsesDex, transferOrder, observeGameForeground, leaveSearch, settleAfterConfirm, returnToBoxAfterSkip } =
   await import("../src/lib/iphone-transfer");
 const { cpCandidates, detailCp, searchResultCount, assertUniqueDexCp, standardTransferDialog, dialogCancelPoint, dialogText, pokemonMenuOpen, collectionSearchState, backgroundQueryMatches, backgroundSearchDecision } =
   await import("../src/lib/iphone-transfer-search");
@@ -482,10 +482,12 @@ test("編號搜尋只接受完整盒子中唯一相同 CP，OCR 依列表欄位�
   const peer = record("cp-peer", { cp: 180 });
   assert.deepEqual(
     assertUniqueDexCp(target, [target, peer], snapshot, new Set([target.id, peer.id])),
-    { dex: 10, cp: 179 },
+    { dex: 10, cp: 179, cpSearch: false },
   );
-  assert.throws(() =>
+  // Outside the complete box the phone's dex&cp search proves uniqueness instead.
+  assert.deepEqual(
     assertUniqueDexCp(target, [target, peer], snapshot, null),
+    { dex: 10, cp: 179, cpSearch: true },
   );
   assert.throws(() =>
     assertUniqueDexCp(
@@ -1392,8 +1394,19 @@ test("放生搜尋勾選條件使用繁中白名單與固定順序，輸入後�
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!未知"), false);
   assert.throws(() => transferSearchQuery(25, ["background", "lucky", "shiny", "costume", "shadow"]), /最多四項/);
   assert.equal(allowedPhoneSearchQuery("25&!背卡&!亮晶晶&!異色&!特殊&!暗影"), false);
+  assert.equal(transferSearchQuery(25, ["background"], 702), "25&cp702&!背卡");
+  assert.equal(allowedPhoneSearchQuery("25&cp702&!背卡"), true);
+  assert.equal(allowedPhoneSearchQuery("25&cp702"), true);
+  assert.equal(allowedPhoneSearchQuery("25&cp702&背卡"), false);
+  assert.equal(allowedPhoneSearchQuery("25&cp0702"), false);
+  assert.throws(() => transferSearchQuery(25, [], 9), /CP/);
+  await assert.rejects(
+    locateCp({} as IphoneMcp, { observation_id: "s" } as never,
+      [{ text: "寶可夢（2）", confidence: 0.9, x: 0.45, y: 0.87 }], 25, 702, "b", 0, "25&cp702&!背卡"),
+    /有 2 隻，不是唯一一隻/,
+  );
   const events: string[] = [];
-  await typeFilteredSearch({} as IphoneMcp, 25, selected,
+  await typeFilteredSearch({} as IphoneMcp, 25, selected, undefined,
     async (query) => { events.push(`type ${query}`); },
     async () => { events.push("screen"); return { observation_id: "search" } as never; },
     async (_phone, screen) => { events.push(`submit ${screen.observation_id}`); });

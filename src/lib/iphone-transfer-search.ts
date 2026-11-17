@@ -182,12 +182,13 @@ export function assertUniqueDexCp(
   snapshot: Snapshot | null,
   completeBoxIds: Set<string> | null,
 ) {
-  if (!snapshot || !completeBoxIds?.has(target.id))
-    throw new Error("沒有涵蓋此個體的完整盒子掃描，無法只靠 CP 放生");
   const fields = effective(target);
-  const dex = fields.speciesId && snapshot.species[fields.speciesId]?.dex;
-  if (!dex || fields.cp === null)
+  const dex = fields.speciesId && snapshot?.species[fields.speciesId]?.dex;
+  if (!snapshot || !dex || fields.cp === null)
     throw new Error("缺少圖鑑編號或 CP，無法搜尋放生個體");
+  // Outside the complete box other same-CP Pokémon may be unknown, so the
+  // game's own dex&cp search must show exactly one result instead.
+  if (!completeBoxIds?.has(target.id)) return { dex, cp: fields.cp, cpSearch: true };
   const matches = records.filter((record) => {
     const value = effective(record);
     return (
@@ -201,5 +202,5 @@ export function assertUniqueDexCp(
   });
   if (matches.length !== 1 || matches[0].id !== target.id)
     throw new Error("完整盒子中有多隻相同圖鑑編號與 CP，需人工辨識");
-  return { dex, cp: fields.cp };
+  return { dex, cp: fields.cp, cpSearch: false };
 }
