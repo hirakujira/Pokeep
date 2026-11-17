@@ -37,7 +37,7 @@ export type Catalog = {
   moves: { id: string; name: string }[];
   visualForms: Record<string, VisualForm[]>;
 };
-export type Tab = "iphone" | "results" | "settings";
+export type Tab = "iphone" | "results" | "ask" | "settings";
 export type PhoneState = {
   worker: {
     updatedAt: string;

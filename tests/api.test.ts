@@ -933,3 +933,39 @@ test("清除全部寶可夢需明確確認，保留連線設定與遊戲資料",
   assert.equal(store.getSnapshot()?.version, "fixture-1");
   assert.equal((store.get<{ apiKey: string }>("settings", "runtime-config"))?.apiKey, "test-only-secret");
 });
+
+test("詢問 AI 只帶仍持有的紀錄給已設定的 AI，並回傳回答", async () => {
+  const http = await import("node:http");
+  let sent: { instructions: string; input: { role: string; content: string }[] } | null = null;
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      sent = JSON.parse(raw);
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: "resp", object: "response", status: "completed",
+        output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "留下綠毛蟲", annotations: [] }] }],
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    store.put("pokemon", "ask-kept", record("ask-kept", { cp: 321 }));
+    store.put("pokemon", "ask-gone", { ...record("ask-gone", { cp: 654 }), owned: false });
+    assert.equal((await request("ask", "POST", { messages: [] })).status, 400);
+    await request("runtime-settings", "PATCH", { apiKey: "test-key", baseUrl: `http://127.0.0.1:${port}/v1` });
+    const response = await request("ask", "POST", { messages: [{ role: "user", content: "哪隻該留？" }] });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { answer: "留下綠毛蟲" });
+    assert.match(sent!.instructions, /ask-kept \| .*CP321/);
+    assert.doesNotMatch(sent!.instructions, /ask-gone/);
+    assert.deepEqual(sent!.input, [{ role: "user", content: "哪隻該留？" }]);
+  } finally {
+    await request("runtime-settings", "PATCH", { clearApiKey: true, baseUrl: "" });
+    store.remove("pokemon", "ask-kept");
+    store.remove("pokemon", "ask-gone");
+    server.close();
+  }
+});

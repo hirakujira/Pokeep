@@ -13,7 +13,7 @@ import { cycleDps } from "./raid";
 
 export type CombatPick = { raid?: RaidResult; league?: LeagueResult };
 
-const leagueNames: Record<number, string> = {
+export const leagueNames: Record<number, string> = {
   1500: "超級聯盟",
   2500: "高級聯盟",
   10000: "大師聯盟",

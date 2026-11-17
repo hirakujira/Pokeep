@@ -2366,3 +2366,94 @@ body:has(.drawer-backdrop) .toast.toast-stacked {
     transition: none !important;
   }
 }
+
+/* ---------- Ask AI ---------- */
+.ask-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+}
+.ask-message {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.ask-message.user {
+  align-self: flex-end;
+}
+.ask-message.markdown {
+  white-space: normal;
+  overflow-x: auto;
+}
+.ask-message.markdown > * + * {
+  margin-top: 8px;
+}
+.ask-message.markdown :is(h1, h2, h3, h4) {
+  font-size: 15px;
+  font-weight: 700;
+}
+.ask-message.markdown :is(ul, ol) {
+  padding-left: 22px;
+}
+.ask-message.markdown li + li {
+  margin-top: 2px;
+}
+.ask-message.markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 13px;
+}
+.ask-message.markdown pre {
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow-x: auto;
+}
+.ask-message.markdown pre code {
+  padding: 0;
+}
+.ask-message.markdown table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ask-message.markdown :is(th, td) {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  text-align: left;
+}
+.ask-message.markdown th {
+  background: var(--surface);
+}
+.ask-message.markdown blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--ink-2);
+}
+.ask-message.markdown a {
+  text-decoration: underline;
+}
+.ask-message.error {
+  background: var(--red-soft);
+  color: var(--red-strong);
+}
+.ask-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+.ask-form textarea {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  font-size: 14px;
+  resize: vertical;
+}

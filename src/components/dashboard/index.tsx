@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from "react";
 import { CheckCircle2, CircleHelp, RefreshCw, Smartphone, X } from "lucide-react";
 import { categoryLabels } from "@/lib/types";
+import { AskAiView } from "./ask-ai";
 import { tabs } from "./constants";
 import { number } from "./format";
 import { IphoneView } from "./iphone-view";
@@ -125,7 +126,7 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          {tab !== "settings" && tab !== "iphone" && (
+          {tab === "results" && (
             <StatsGrid
               living={living}
               counts={counts}
@@ -199,6 +200,7 @@ export default function Dashboard() {
               />
             </>
           )}
+          {tab === "ask" && <AskAiView apiConfigured={state.apiConfigured} />}
           {tab === "settings" && (
             <SettingsView
               state={state}

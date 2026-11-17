@@ -3,6 +3,7 @@ import {
   CircleHelp,
   ClipboardCheck,
   FolderHeart,
+  MessageCircle,
   Settings2,
   Smartphone,
   Swords,
@@ -34,6 +35,7 @@ export const empty: State = {
 export const tabs = [
   { id: "iphone" as Tab, label: "iPhone 掃描", icon: Smartphone },
   { id: "results" as Tab, label: "清倉結果", icon: ClipboardCheck },
+  { id: "ask" as Tab, label: "詢問 AI", icon: MessageCircle },
   { id: "settings" as Tab, label: "設定", icon: Settings2 },
 ];
 export const scanStatusLabels: Record<Scan["status"], string> = {

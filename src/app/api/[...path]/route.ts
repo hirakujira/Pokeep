@@ -14,6 +14,7 @@ import { clearAll, merge, reevaluateAll, updatePokemon } from "./_handlers/pokem
 import { refreshGameData, speciesCatalog } from "./_handlers/game-data";
 import { frameImage, spriteImage } from "./_handlers/images";
 import { exportData, importData } from "./_handlers/backup";
+import { ask } from "./_handlers/ask";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ const routes = new Map<string, Handler>([
   ["POST reevaluate", reevaluateAll],
   ["PATCH settings", updateSettings],
   ["POST data/update", refreshGameData],
+  ["POST ask", ask],
 ]);
 
 async function handle(req: NextRequest, ctx: Context) {
