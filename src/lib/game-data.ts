@@ -130,7 +130,7 @@ function visualFormLabel(pokemon: string, suffix: string, tr: Record<string, str
  * one battle species, so PvPoke has no IDs for them. Species with several
  * catalog IDs already list their forms through those IDs.
  */
-export function visualFormsByDex(
+function visualFormsByDex(
   gm: Raw[],
   tr: Record<string, string>,
   species: Snapshot["species"],

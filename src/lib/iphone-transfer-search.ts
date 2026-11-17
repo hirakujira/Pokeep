@@ -1,7 +1,7 @@
 import type { OcrLine } from "./local-ocr";
 import { effective, type Pokemon, type Snapshot } from "./types";
 
-export type CpCandidate = {
+type CpCandidate = {
   cp: number;
   x: number;
   y: number;
@@ -36,7 +36,7 @@ export function collectionSearchState(lines: OcrLine[]): "empty" | "active" | nu
 }
 
 /** Look up rare backgrounds with a positive query before the ordinary dex search. */
-export function backgroundQuery(dex: number) {
+function backgroundQuery(dex: number) {
   if (!Number.isInteger(dex) || dex < 1 || dex > 10000)
     throw new Error("沒有可靠的圖鑑編號，無法檢查特殊背卡");
   return `${dex}&背卡`;

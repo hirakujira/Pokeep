@@ -304,9 +304,3 @@ export function transferSignature(
     )
     .digest("hex");
 }
-
-export function hasUncertainOperation(batch: TransferBatch) {
-  return batch.entries.some((entry) =>
-    ["searching", "unfavoriting", "prepared", "sent", "uncertain"].includes(entry.status),
-  );
-}

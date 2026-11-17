@@ -41,7 +41,6 @@ export const scanSchema = z.object({
   iphoneUseVersion: z.string().nullable(),
 });
 export type Scan = z.infer<typeof scanSchema>;
-export type ScanStatus = Scan["status"];
 export const scanItemSchema = z.object({
   id: z.string().max(100),
   scanId: z.string().max(100),

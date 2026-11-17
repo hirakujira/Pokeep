@@ -210,7 +210,7 @@ export type Analysis = {
   snapshot: string | null;
   evaluatedAt: string;
 };
-export const speciesSchema = z.object({
+const speciesSchema = z.object({
   id: z.string(),
   dex: z.number().int().min(1),
   name: z.string(),

@@ -30,7 +30,7 @@ export type EvolutionChoice = {
   needsReview: Set<string>;
 };
 export type LineChoice = { winner: Pokemon | undefined; peers: Map<string, string> };
-export type CollectionDecisions = {
+type CollectionDecisions = {
   snapshot: Snapshot | null;
   settings: Settings;
   completeBoxIds?: Set<string>;

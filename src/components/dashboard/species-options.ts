@@ -14,7 +14,7 @@ export type FormOption = {
   /** Species IDs (catalog forms) or lower-case form texts (appearance forms) this option stands for. */
   matches: string[];
 };
-export type DexEntry = { dex: number; name: string; options: FormOption[] };
+type DexEntry = { dex: number; name: string; options: FormOption[] };
 
 export const unknownForm = "待確認";
 export const keptFormKey = "?raw";

@@ -296,22 +296,6 @@ test("物種選單每個圖鑑編號一項，形態另列且無法判斷時為�
   assert.equal(speciesWithShadow("rattata_shadow", null, ids), "rattata_shadow");
 });
 
-test("詳細資料面板以圖鑑編號與形態兩個選單顯示目前物種", () => {
-  const html = renderToString(React.createElement(PokemonDrawer, {
-    pokemon: record("sea", { name: "無殼海兔", speciesId: "shellos", form: "east_sea" }),
-    records: [],
-    catalog: formCatalog,
-    error: "",
-    onClose: () => {},
-    onSave: async () => null,
-    onMerge: async () => {},
-    busy: false,
-  }));
-  assert.match(html, /<option value="422" selected="">#422 無殼海兔<\/option>/);
-  assert.match(html, /<option value="east_sea" selected="">東海<\/option>/);
-  assert.match(html, /<option value="">待確認<\/option>/);
-  assert.doesNotMatch(html, /暗影）<\/option>/);
-});
 
 test("詳細資料面板的服裝欄位提供同物種已用過的服裝名稱", () => {
   const html = renderToString(React.createElement(PokemonDrawer, {

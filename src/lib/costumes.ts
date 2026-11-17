@@ -1,7 +1,7 @@
 import { effective, type Pokemon, type Snapshot } from "./types";
 import { localizeSpeciesName } from "./species-names";
 
-export type CostumeNames = { names: string[]; aliases: Map<string, string> };
+type CostumeNames = { names: string[]; aliases: Map<string, string> };
 
 export const costumeSpeciesKey = (speciesId: string) => speciesId.replace(/_shadow$/, "");
 const textKey = (text: string) => text.replace(/\s+/g, "");

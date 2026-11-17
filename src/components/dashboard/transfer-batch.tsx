@@ -58,7 +58,7 @@ export function transferProgress(batch: TransferBatch, records: Pokemon[]) {
     statusLabel,
   };
 }
-export type TransferProgress = ReturnType<typeof transferProgress>;
+type TransferProgress = ReturnType<typeof transferProgress>;
 
 export function BatchProgressPanel({
   batch,

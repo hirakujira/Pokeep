@@ -2,7 +2,7 @@ import path from "node:path";
 import { z } from "zod";
 import { get, put } from "./store";
 
-export const phoneBackends = ["iphone-use", "device-mcp"] as const;
+const phoneBackends = ["iphone-use", "device-mcp"] as const;
 export type PhoneBackend = (typeof phoneBackends)[number];
 
 export const defaultRuntimeConfig = {

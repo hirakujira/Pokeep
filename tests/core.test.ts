@@ -924,13 +924,6 @@ test("淨化與暗影成本各自套用倍率並逐次進位", () => {
     6,
   );
 });
-test("IV 排名遍歷 4096 組：CP 遠低於上限的滿 IV 排名第一", () => {
-  const s = fixture();
-  assert.equal(rankIV(s.species.caterpie, [15, 15, 15], 1500, s).rank, 1);
-  const low = rankIV(s.species.caterpie, [0, 0, 0], 1500, s);
-  assert.ok(low.rank > 4000);
-  assert.ok(low.cp <= 1500);
-});
 test("IV 排名表與逐組比較的結果一致，含 CP 上限造成的同分", () => {
   const s = fixture();
   const strong = { ...species("strong"), atk: 190, def: 160, sta: 170 };

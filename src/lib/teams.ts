@@ -9,12 +9,12 @@ export type PvpBenchMember = TeamMember<LeagueResult> & {
   /** Why a better-ranked member did not make the team. */
   blockedBy: "species" | "pokemon" | null;
 };
-export type PvpTeam = {
+type PvpTeam = {
   league: number;
   starters: TeamMember<LeagueResult>[];
   bench: PvpBenchMember[];
 };
-export type RaidTeam = {
+type RaidTeam = {
   type: string;
   starters: TeamMember<RaidResult>[];
   bench: TeamMember<RaidResult>[];

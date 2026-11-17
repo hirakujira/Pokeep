@@ -3,7 +3,7 @@ import type { Scan, TransferBatch } from "@/lib/iphone-types";
 import type { ScanTiming } from "@/lib/scan-timing";
 import type { PhoneBackend, PublicRuntimeConfig } from "@/lib/runtime-config";
 
-export type SnapshotInfo = {
+type SnapshotInfo = {
   version: string;
   updatedAt: string;
   sourceDate: string;

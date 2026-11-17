@@ -35,7 +35,7 @@ type Observation = {
 };
 type DeviceInfo = { locked: boolean; inputReady: boolean; viewport: Viewport | null };
 
-export type DeviceMcpOptions = {
+type DeviceMcpOptions = {
   executable: string;
   /** Device name or UDID; empty uses the device selected in Device MCP. */
   device: string;

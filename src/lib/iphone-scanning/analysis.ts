@@ -60,7 +60,7 @@ export function mergeScreens(
   };
 }
 
-export type PreparedAnalysis = {
+type PreparedAnalysis = {
   recognized: OcrVisionResult;
   measuredAgain: IvMeasurement | null;
 };

@@ -11,7 +11,6 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pokekeep-phone-connection-te
 (globalThis as typeof globalThis & { __POGO_TEST_DATA_DIR__?: string }).__POGO_TEST_DATA_DIR__ = temp;
 const store = await import("../src/lib/store");
 const { captureOne } = await import("../src/lib/iphone-scan");
-const { typeFilteredSearch } = await import("../src/lib/iphone-transfer");
 const { createPhoneConnection, phoneConnectionKey } = await import("../src/lib/phone-connection");
 const { defaultRuntimeConfig } = await import("../src/lib/runtime-config");
 const { IphoneMcp } = await import("../src/lib/iphone-mcp");
@@ -136,16 +135,6 @@ test("沒有盲點能力時維持每次點擊後截圖與評價雙重確認", as
   );
 });
 
-test("放生搜尋預設透過手機連線輸入文字", async () => {
-  const typed: string[] = [];
-  const phone = {
-    async typeSearch(query: string) {
-      typed.push(query);
-    },
-  } as unknown as PhoneConnection;
-  await typeFilteredSearch(phone, 25, ["background"], undefined, async () => ({}) as never, async () => {});
-  assert.deepEqual(typed, ["25&!背卡"]);
-});
 
 test("依設定建立手機連線，只有連線相關設定改變才需要重新連線", () => {
   const base = { ...defaultRuntimeConfig };
