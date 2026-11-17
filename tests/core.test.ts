@@ -75,6 +75,14 @@ test("自動核對失敗列出保存的畫面缺口", () => {
   ]);
   assert.deepEqual(verificationEvidenceGaps({ ...item, protectionClear: true },
     top, { ...appraisal, fields: { ...appraisal.fields, name: "喵喵" } }, [5]), []);
+  const named = { ...appraisal, fields: { ...appraisal.fields, name: "喵喵", cp: null } };
+  const withHp = { ...top, fields: { ...top.fields, hp: 30 } };
+  assert.deepEqual(verificationEvidenceGaps({ ...item, protectionClear: true },
+    withHp, named, [5]), []);
+  assert.deepEqual(verificationEvidenceGaps({ ...item, protectionClear: true },
+    withHp, named, []), ["評價頁 CP 辨識結果為空，無法交叉比對"]);
+  assert.deepEqual(verificationEvidenceGaps({ ...item, protectionClear: true },
+    withHp, { ...named, fields: { ...named.fields, cp: 15 } }, [5]), ["能力頁與評價頁 CP 不一致"]);
   assert.deepEqual(verificationEvidenceGaps(null, top, appraisal, [5]),
     ["沒有保存可供自動核對的手機掃描檢查點"]);
   assert.deepEqual(verificationEvidenceGaps(item, top, appraisal, [5], [], "胸前護目鏡"), [

@@ -363,6 +363,44 @@ test("清倉結果勾選批次只授權明列個體，拒絕重複與受保護�
   store.remove("pokemon", second.id);
 });
 
+test("整盒掃描與之後的最新捕捉掃描可合併放生，且一起算作完整盒子", async () => {
+  const { completeBoxIds } = await import("../src/lib/evaluate");
+  store.saveSnapshot(fixture());
+  const analysis = { category: "transfer", currentLevels: [15] } as Pokemon["analysis"];
+  const old = record("mixed-old", { cp: 179, favorite: false }, { analysis });
+  const fresh = record("mixed-new", { cp: 180, favorite: false }, { analysis });
+  const scan = (id: string, scope: string, createdAt: string, status = "completed") => ({
+    id, scope, status, phase: "analysis", stage: "完成", createdAt, updatedAt: createdAt,
+    scanned: 1, analyzed: 1, review: 0, expected: 1, sort: null, currentFrame: null,
+    lastFingerprint: null, apiUsage: { input: 0, output: 0, requests: 0, cached: 0 },
+    error: null, checkpointRequired: false, iphoneUseVersion: "test",
+  });
+  const item = (id: string, scanId: string, pokemon: Pokemon) => ({
+    id, scanId, position: 0, pokemonId: pokemon.id, fields: pokemon.fields, issues: [],
+    protectionClear: true, frame: "", appraisalFrame: null, fingerprint: "",
+    capturedAt: new Date().toISOString(),
+  });
+  store.put("pokemon", old.id, old);
+  store.put("pokemon", fresh.id, fresh);
+  store.put("scans", "mixed-full", scan("mixed-full", "all", "2099-01-01T00:00:00.000Z"));
+  store.put("scans", "mixed-latest", scan("mixed-latest", "latest", "2099-01-02T00:00:00.000Z"));
+  store.put("scan_items", "mixed-full-item", item("mixed-full-item", "mixed-full", old));
+  store.put("scan_items", "mixed-latest-item", item("mixed-latest-item", "mixed-latest", fresh));
+  assert.deepEqual([...completeBoxIds()!].sort(), [old.id, fresh.id].sort());
+  const response = await request("transfers/execute-many", "POST", { pokemonIds: [old.id, fresh.id] });
+  assert.equal(response.status, 200);
+  const batch = (await response.json()) as TransferBatch;
+  assert.deepEqual(batch.entries.map((entry) => entry.pokemonId).sort(), [old.id, fresh.id].sort());
+  store.remove("transfer_batches", batch.id);
+  store.put("scans", "mixed-broken", scan("mixed-broken", "latest", "2099-01-03T00:00:00.000Z", "stopped"));
+  store.put("scan_items", "mixed-broken-item", item("mixed-broken-item", "mixed-broken", fresh));
+  assert.deepEqual([...completeBoxIds()!], [old.id]);
+  for (const id of ["mixed-full-item", "mixed-latest-item", "mixed-broken-item"]) store.remove("scan_items", id);
+  for (const id of ["mixed-full", "mixed-latest", "mixed-broken"]) store.remove("scans", id);
+  store.remove("pokemon", old.id);
+  store.remove("pokemon", fresh.id);
+});
+
 test("暫停批次按繼續只重試搜尋前失敗與未開始個體，拒絕重複請求及不明結果", async () => {
   const { transferSignature } = await import("../src/lib/iphone-safety");
   const snapshot = fixture();

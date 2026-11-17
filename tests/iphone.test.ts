@@ -648,6 +648,22 @@ test("一般形態只在招式能區分地區型態時自動配對", () => {
   }), null);
 });
 
+test("一般形態配對無形態物種，外觀顏色配對唯一圖鑑物種", () => {
+  const snapshot = fixture();
+  snapshot.species.deoxys = species("deoxys", { dex: 386, name: "代歐奇希斯" });
+  snapshot.species.deoxys_attack = species("deoxys_attack", {
+    dex: 386, name: "代歐奇希斯 (Attack)", form: "(Attack)",
+  });
+  snapshot.species.minior_core = species("minior_core", { dex: 774, name: "小隕星 (Core)", form: "(Core)" });
+  snapshot.visualForms[774] = [{ id: "yellow", label: "黃色核心" }];
+  assert.equal(resolveSpecies(snapshot, "代歐奇希斯", "一般形態", false, "deoxys_normal")?.id, "deoxys");
+  assert.equal(resolveSpecies(snapshot, "小隕星", "黃色核心", false, "minior")?.id, "minior_core");
+  assert.equal(resolveSpecies(snapshot, "小隕星", "核心形態（黃色）", false, "minior")?.id, "minior_core");
+  assert.equal(resolveSpecies(snapshot, "代歐奇希斯", "紅色核心", false, null), null);
+  snapshot.species.qwilfish_hisuian = species("qwilfish_hisuian", { dex: 211, name: "千針魚 (Hisuian)", form: "(Hisuian)" });
+  assert.equal(resolveSpecies(snapshot, "千針魚", "洗翠", false, "qwilfish_hisui")?.id, "qwilfish_hisuian");
+});
+
 test("暗影與淨化的外觀複核需兩張清楚畫面一致", () => {
   const clear = {
     top: "normal" as const,
@@ -1188,6 +1204,19 @@ test("備份包含尚未解析的三張手機截圖", async () => {
   store.remove("scan_items", "raw-item");
 });
 
+test("最新捕捉掃描以 CP、最大 HP 與 IV 認出資料庫中的個體", async () => {
+  const { knownPokemon } = await import("../src/lib/iphone-scanning/capture");
+  const owned = record("known");
+  const line = (text: string) => ({ text, confidence: 1, x: 0.5, y: 0.5 });
+  const lines = [line("CP179"), line("綠毛蟲"), line("50 / 72 HP")];
+  assert.equal(knownPokemon(lines, [14, 12, 13], "scan", [owned])?.id, "known");
+  assert.equal(knownPokemon(lines, [14, 12, 12], "scan", [owned]), null);
+  assert.equal(knownPokemon([line("CP179"), line("72 / 73 HP")], [14, 12, 13], "scan", [owned]), null);
+  assert.equal(knownPokemon(lines, null, "scan", [owned]), null);
+  assert.equal(knownPokemon(lines, [14, 12, 13], "fixture-job", [owned]), null);
+  assert.equal(knownPokemon(lines, [14, 12, 13], "scan", [{ ...owned, owned: false }]), null);
+});
+
 test("自動核對需要穩定 IV 量測、身分與特殊狀態明確", () => {
   const fields = record("iv", { favorite: false }).fields;
   const input = {
@@ -1214,6 +1243,26 @@ test("自動核對需要穩定 IV 量測、身分與特殊狀態明確", () => {
       ...input,
       appraisal: { ...fields, ivAtk: null },
     }),
+    false,
+  );
+  assert.equal(
+    safety.automaticVerification({ ...input, appraisal: { ...fields, cp: null } }),
+    true,
+  );
+  assert.equal(
+    safety.automaticVerification({ ...input, top: { ...fields, cp: null } }),
+    true,
+  );
+  assert.equal(
+    safety.automaticVerification({
+      ...input,
+      appraisal: { ...fields, cp: null },
+      levels: [],
+    }),
+    false,
+  );
+  assert.equal(
+    safety.automaticVerification({ ...input, appraisal: { ...fields, cp: fields.cp! + 1 } }),
     false,
   );
   assert.equal(

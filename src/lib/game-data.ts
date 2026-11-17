@@ -566,6 +566,10 @@ export function resolveSpecies(
   providedId: string | null,
   moves?: Pick<Fields, "fastMove" | "chargeMove" | "chargeMove2">,
 ): Species | null {
+  // Vision models spell regional IDs loosely (qwilfish_hisui for qwilfish_hisuian, deoxys_normal for deoxys).
+  if (providedId && !snapshot.species[providedId])
+    providedId = Object.keys(snapshot.species).find((id) =>
+      !id.endsWith("_shadow") && norm(id) === norm(providedId!)) ?? null;
   if (providedId && snapshot.species[providedId]) {
     const wanted =
       shadow === true
@@ -583,9 +587,11 @@ export function resolveSpecies(
     !form || form === "normal" || form === "一般"
       ? !s.form
       : /^(一般|普通)(形態|型態)$/.test(form)
-        ? s.id.replace(/_shadow$/, "").endsWith("_standard")
+        ? !s.form || s.id.replace(/_shadow$/, "").endsWith("_standard")
       : s.id.includes(form.toLowerCase().replace("alola", "alolan")) ||
-        s.form?.toLowerCase().includes(form.toLowerCase());
+        s.form?.toLowerCase().includes(form.toLowerCase()) ||
+        // Dexes with visual forms (Minior's core colours) have a single catalog species.
+        Boolean(snapshot.visualForms[s.dex]);
   const exact = candidates.filter(
     (s) => Boolean(s.tags.includes("shadow")) === Boolean(shadow) && isForm(s),
   );

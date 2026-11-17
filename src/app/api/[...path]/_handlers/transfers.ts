@@ -113,13 +113,15 @@ function approveSelection(pokemonIds: string[], searchExclusions: SearchExclusio
     if (activeScan() || activeBatch())
       throw new Error("手機正在處理其他工作");
     const wanted = new Set(pokemonIds);
-    const scan = scans().find((row) => {
-      if (row.status !== "completed") return false;
-      const present = new Set(scanItems(row.id).map((item) => item.pokemonId));
-      return pokemonIds.every((id) => present.has(id));
-    });
-    if (!scan) throw new Error("找不到包含全部勾選個體的已完成掃描");
-    const preview = previewBatch(scan.id);
+    // Newest completed scan per Pokémon, so a full box scan and later latest-catch scans can share one batch.
+    const scanOf = new Map<string, string>();
+    for (const row of scans().filter((scan) => scan.status === "completed"))
+      for (const item of scanItems(row.id))
+        if (item.pokemonId && !scanOf.has(item.pokemonId)) scanOf.set(item.pokemonId, row.id);
+    if (pokemonIds.some((id) => !scanOf.has(id)))
+      throw new Error("找不到包含全部勾選個體的已完成掃描");
+    const [first, ...rest] = [...new Set(pokemonIds.map((id) => scanOf.get(id)!))];
+    const preview = previewBatch(first, ...rest);
     const entries = preview.entries.filter((entry) => wanted.has(entry.pokemonId));
     if (entries.length !== wanted.size || entries.some((entry) => entry.status !== "pending"))
       throw new Error("部分勾選個體已不符合放生條件，請重新檢查名單");

@@ -13,7 +13,7 @@ import {
 import type { Scan } from "@/lib/iphone-types";
 import { body, json } from "./http";
 
-const startInput = z.object({ scope: z.enum(["results", "all"]) });
+const startInput = z.object({ scope: z.enum(["results", "all", "latest"]) });
 const controlInput = z.object({
   action: z.enum(["pause", "resume", "stop", "finish"]),
 });

@@ -14,7 +14,7 @@ import {
 
 export const scanSchema = z.object({
   id: z.string().max(100),
-  scope: z.enum(["results", "all"]),
+  scope: z.enum(["results", "all", "latest"]),
   status: z.enum(["queued", "running", "paused", "completed", "stopped", "failed"]),
   stage: z.string().max(500),
   createdAt: z.string().datetime(),

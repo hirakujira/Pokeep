@@ -178,7 +178,10 @@ export async function recognizeScanWithOcr(
       moves,
     );
     if (species) top.speciesId = species.id;
-    else parsed.issues.push("物種／形態無法唯一對應，請人工核對");
+    else {
+      if (top.speciesId && !snapshot.species[top.speciesId]) top.speciesId = null;
+      parsed.issues.push("物種／形態無法唯一對應，請人工核對");
+    }
     for (const key of moveKeys)
       if (moves[key]) moves[key] = resolveMoveId(snapshot, moves[key], species);
   }

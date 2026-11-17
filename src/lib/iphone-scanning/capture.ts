@@ -1,9 +1,12 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { PhoneConnection } from "../phone-connection";
 import { saveEvidenceFrame } from "../frame-evidence";
 import { measureIV } from "../iv";
 import { detailFingerprint } from "../iphone-fingerprint";
-import { dataDir, get, id, now, put, transaction } from "../store";
+import { readLocalOcr, type OcrLine } from "../local-ocr";
+import { dataDir, get, id, listPokemon, now, put, transaction } from "../store";
+import { effective, type Pokemon } from "../types";
 import { updateScan } from "../iphone-data";
 import type { Scan, ScanItem } from "../iphone-types";
 import type { PhoneObservation } from "./phone";
@@ -36,6 +39,25 @@ export async function saveCapture(
       : bottomRatio,
   );
   return { frame, iv };
+}
+
+/** CP and max HP read from the detail page plus the measured IV must all equal an owned record. */
+export function knownPokemon(
+  lines: OcrLine[],
+  iv: number[] | null,
+  scanId: string,
+  pokemon: Pokemon[] = listPokemon(),
+) {
+  const text = lines.map((line) => line.text).join(" ");
+  const cp = text.match(/CP\s*([0-9][0-9,]*)/i)?.[1]?.replace(/,/g, "");
+  const hp = text.match(/\d+\s*\/\s*(\d+)\s*HP|HP\s*\d+\s*\/\s*(\d+)/i);
+  const maxHp = hp?.[1] ?? hp?.[2];
+  if (!cp || !maxHp || !iv || iv.length !== 3) return null;
+  return pokemon.find((p) => {
+    const f = effective(p);
+    return p.owned && p.jobId !== scanId && f.cp === Number(cp) &&
+      f.hp === Number(maxHp) && f.ivAtk === iv[0] && f.ivDef === iv[1] && f.ivSta === iv[2];
+  }) ?? null;
 }
 
 export async function captureOne(
@@ -79,6 +101,20 @@ export async function captureOne(
     `${String(position).padStart(6, "0")}-iv`,
     true,
   );
+  if (scan.scope === "latest") {
+    const topPath = path.join(dataDir, "frames", top.frame);
+    if (knownPokemon((await readLocalOcr([topPath]))[0], appCapture.iv, scan.id)) {
+      // This one is already stored; keep only the newer catches before it.
+      await Promise.allSettled([top.frame, lower.frame, appCapture.frame].map((frame) =>
+        fs.rm(path.join(dataDir, "frames", frame), { force: true })));
+      const current = get<Scan>("scans", scan.id)!;
+      updateScan(scan.id, {
+        expected: current.scanned,
+        stage: `第 ${current.scanned + 1} 隻已在資料庫，停止截圖`,
+      });
+      return dismissAppraisalForScan(phone, appraisal);
+    }
+  }
   const item: ScanItem = {
     id: id(),
     scanId: scan.id,

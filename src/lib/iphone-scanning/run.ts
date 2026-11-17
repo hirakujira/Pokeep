@@ -78,7 +78,7 @@ async function openFirstPokemon(phone: PhoneConnection, scan: Scan) {
   if (scan.scanned === 0 && page?.page !== "collection")
     throw new Error("開始掃描前請在 Pokémon GO 開啟寶可夢盒子列表");
   if (page?.page === "collection") {
-    if (scan.scope === "all")
+    if (scan.scope !== "results")
       ({ current, page } = await clearSearchAndFilters(phone, current, page));
     scan = updateScan(scan.id, {
       expected: page.visibleCount,

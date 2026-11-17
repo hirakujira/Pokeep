@@ -4,7 +4,7 @@ import { api } from "./api";
 import type { Notify, RunAction } from "./types";
 
 export function useScanActions(phoneAct: RunAction, notify: Notify) {
-  const [scanScope, setScanScope] = useState<"results" | "all">("results");
+  const [scanScope, setScanScope] = useState<Scan["scope"]>("results");
   const preparePhone = () => {
     void phoneAct("prepare-phone", async () => {
       await api("iphone/prepare", "POST");

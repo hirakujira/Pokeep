@@ -153,17 +153,20 @@ export function updateScan(idValue: string, patch: Partial<Scan>) {
   put("scans", idValue, result);
   return result;
 }
-export function previewBatch(scanId: string) {
-  const scan = get<Scan>("scans", scanId);
-  if (!scan || scan.status !== "completed")
-    throw new Error("掃描必須完整完成才能建立放生批次");
+export function previewBatch(scanId: string, ...moreScanIds: string[]) {
   if (activeScan() || activeBatch()) throw new Error("已有手機工作在執行");
-  const items = scanItems(scanId);
-  if (
-    items.length !== scan.scanned ||
-    items.some((item) => !item.pokemonId || !item.fields)
-  )
-    throw new Error("掃描截圖尚未全部解析，不能建立放生批次");
+  const items = [scanId, ...moreScanIds].flatMap((idValue) => {
+    const scan = get<Scan>("scans", idValue);
+    if (!scan || scan.status !== "completed")
+      throw new Error("掃描必須完整完成才能建立放生批次");
+    const rows = scanItems(idValue);
+    if (
+      rows.length !== scan.scanned ||
+      rows.some((item) => !item.pokemonId || !item.fields)
+    )
+      throw new Error("掃描截圖尚未全部解析，不能建立放生批次");
+    return rows;
+  });
   const records = listPokemon();
   const selected = items.flatMap((item) => {
     if (!item.pokemonId || !item.protectionClear) return [];

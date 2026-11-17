@@ -34,9 +34,13 @@ export function verificationEvidenceGaps(
       gaps.push(`${!top.fields.name ? "能力頁" : "評價頁"}名稱辨識結果為空，無法交叉比對`);
     else if (top.fields.name !== appraisal.fields.name)
       gaps.push("能力頁與評價頁名稱不一致");
-    if (top.fields.cp === null || appraisal.fields.cp === null)
-      gaps.push(`${top.fields.cp === null ? "能力頁" : "評價頁"} CP 辨識結果為空，無法交叉比對`);
-    else if (top.fields.cp !== appraisal.fields.cp)
+    // A single CP source is trusted only once CP, HP and IV fit exactly one level.
+    const singleCp = (top.fields.cp ?? appraisal.fields.cp) !== null &&
+      (top.fields.hp ?? appraisal.fields.hp) !== null && levels.length === 1;
+    if (top.fields.cp === null || appraisal.fields.cp === null) {
+      if (!singleCp)
+        gaps.push(`${top.fields.cp === null ? "能力頁" : "評價頁"} CP 辨識結果為空，無法交叉比對`);
+    } else if (top.fields.cp !== appraisal.fields.cp)
       gaps.push("能力頁與評價頁 CP 不一致");
     const iv = [appraisal.fields.ivAtk, appraisal.fields.ivDef, appraisal.fields.ivSta];
     if (!item.measuredIV || item.measuredIV.length !== 3 ||

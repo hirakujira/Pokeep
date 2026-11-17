@@ -91,6 +91,15 @@ export function IphoneView({
             />
             整個寶可夢盒子
           </label>
+          <label>
+            <input
+              type="radio"
+              name="scan-scope"
+              checked={actions.scanScope === "latest"}
+              onChange={() => actions.setScanScope("latest")}
+            />
+            最新捕捉（需依捕捉時間排序，遇到已存在個體即停止）
+          </label>
         </div>
         <button
           className="button primary"
@@ -173,7 +182,9 @@ function ScanProgressPanel({
         範圍：
         {scan.scope === "all"
           ? "整個盒子"
-          : "目前搜尋結果"}{" "}
+          : scan.scope === "latest"
+            ? "最新捕捉"
+            : "目前搜尋結果"}{" "}
         · 排序：{scan.sort || "未讀取"}
       </p>
       {scan.error && (

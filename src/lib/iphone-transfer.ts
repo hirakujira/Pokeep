@@ -10,9 +10,9 @@ import {
   transferSignature,
 } from "./iphone-safety";
 import { effective, type Pokemon, type Snapshot } from "./types";
-import { all, get, getSettings, getSnapshot, listPokemon, now, put, transaction } from "./store";
-import { reevaluate } from "./evaluate";
-import type { Scan, ScanItem, TransferBatch, TransferEntry } from "./iphone-types";
+import { get, getSettings, getSnapshot, listPokemon, now, put, transaction } from "./store";
+import { completeBoxIds, reevaluate } from "./evaluate";
+import type { TransferBatch, TransferEntry } from "./iphone-types";
 import {
   defaultTransferSearchFilters,
   transferSearchQuery,
@@ -347,19 +347,6 @@ async function findCandidateByDexCp(
   }
 }
 
-function completeBoxIds() {
-  const latest = all<Scan>("scans")
-    .filter((scan) => scan.scope === "all" && scan.status === "completed")
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  if (!latest) return null;
-  const items = all<ScanItem>("scan_items").filter(
-    (item) => item.scanId === latest.id && item.pokemonId,
-  );
-  return items.length === latest.scanned
-    ? new Set(items.map((item) => item.pokemonId!))
-    : null;
-}
-
 export async function typeFilteredSearch(
   phone: PhoneConnection,
   dex: number,
@@ -495,7 +482,7 @@ export async function runTransferBatch(
           record,
           listPokemon(),
           getSnapshot(),
-          completeBoxIds(),
+          completeBoxIds() ?? null,
         );
       } catch (error) {
         if ((error as Error).message.includes("多隻相同圖鑑編號與 CP"))

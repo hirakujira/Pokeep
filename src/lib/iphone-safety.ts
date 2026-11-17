@@ -199,9 +199,10 @@ export function automaticVerification(input: {
     !top.name ||
     !appraisal.name ||
     top.name !== appraisal.name ||
-    top.cp === null ||
-    appraisal.cp === null ||
-    top.cp !== appraisal.cp
+    (top.cp === null && appraisal.cp === null) ||
+    (top.cp !== null && appraisal.cp !== null && top.cp !== appraisal.cp) ||
+    // A single CP source is trusted only once CP, HP and IV fit exactly one level.
+    f.cp !== (top.cp ?? appraisal.cp)
   )
     return false;
   if (
